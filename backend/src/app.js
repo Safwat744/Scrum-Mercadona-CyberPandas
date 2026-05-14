@@ -26,10 +26,10 @@ app.use('/api/v1/auth', require('./modules/auth/auth.routes'));
 app.use('/api/v1/recetas', require('./modules/recetas/recetas.routes'));
 
 // Sprint 3:
-// app.use('/api/v1/lista',     require('./modules/lista/lista.routes'));
+app.use('/api/v1/lista',     require('./modules/lista/lista.routes'));
 
 // Sprint 4:
-// app.use('/api/v1/favoritos', require('./modules/favoritos/favoritos.routes'));
+app.use('/api/v1/favoritos', require('./modules/favoritos/favoritos.routes'));
 
 // ── Manejador global de errores (siempre al final) ─────────────
 app.use(errorHandler);
