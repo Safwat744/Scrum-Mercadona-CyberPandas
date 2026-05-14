@@ -22,8 +22,8 @@ app.get('/api/v1/health', async (req, res) => {
 // ── Rutas — Sprint 1 ───────────────────────────────────────────
 app.use('/api/v1/auth', require('./modules/auth/auth.routes'));
 
-// Sprint 2 (próximo):
-// app.use('/api/v1/recetas',   require('./modules/recetas/recetas.routes'));
+// Sprint 2:
+app.use('/api/v1/recetas', require('./modules/recetas/recetas.routes'));
 
 // Sprint 3:
 // app.use('/api/v1/lista',     require('./modules/lista/lista.routes'));
