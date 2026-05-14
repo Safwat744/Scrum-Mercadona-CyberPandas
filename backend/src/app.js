@@ -1,5 +1,6 @@
-const express = require('express');
-const cors    = require('cors');
+const express       = require('express');
+const cors          = require('cors');
+const errorHandler  = require('./middleware/error.middleware');
 require('dotenv').config();
 
 const app = express();
@@ -7,7 +8,7 @@ const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
 app.use(express.json());
 
-// Health check — útil para verificar que el servidor y la BD están operativos
+// ── Health check ───────────────────────────────────────────────
 app.get('/api/v1/health', async (req, res) => {
   const pool = require('./config/database');
   try {
@@ -18,19 +19,19 @@ app.get('/api/v1/health', async (req, res) => {
   }
 });
 
-// Los routers de cada módulo se añadirán aquí en los sprints siguientes:
-// app.use('/api/v1/auth',      require('./modules/auth/auth.routes'));
+// ── Rutas — Sprint 1 ───────────────────────────────────────────
+app.use('/api/v1/auth', require('./modules/auth/auth.routes'));
+
+// Sprint 2 (próximo):
 // app.use('/api/v1/recetas',   require('./modules/recetas/recetas.routes'));
+
+// Sprint 3:
 // app.use('/api/v1/lista',     require('./modules/lista/lista.routes'));
+
+// Sprint 4:
 // app.use('/api/v1/favoritos', require('./modules/favoritos/favoritos.routes'));
 
-// Manejador global de errores
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(err.status || 500).json({
-    error: err.message || 'Error interno del servidor',
-    code:  err.code    || 'INTERNAL_ERROR',
-  });
-});
+// ── Manejador global de errores (siempre al final) ─────────────
+app.use(errorHandler);
 
 module.exports = app;
