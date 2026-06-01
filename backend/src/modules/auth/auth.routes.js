@@ -29,6 +29,16 @@ const prefsSchema = Joi.object({
     .messages({ 'any.required': 'El campo preferencias es obligatorio.' }),
 });
 
+const updatePerfilSchema = Joi.object({
+  nombre: Joi.string().max(100).allow(null, ''),
+  email: Joi.string().email(),
+}).min(1);
+
+const changePasswordSchema = Joi.object({
+  current_password: Joi.string().required().messages({ 'any.required': 'La contraseña actual es obligatoria.' }),
+  new_password: Joi.string().min(8).required().messages({ 'string.min': 'La nueva contraseña debe tener al menos 8 caracteres.' }),
+});
+
 // ── Rutas públicas ─────────────────────────────────────────────
 router.post('/register', validate(registerSchema), ctrl.register);
 router.post('/login',    validate(loginSchema),    ctrl.login);
@@ -37,5 +47,8 @@ router.post('/login',    validate(loginSchema),    ctrl.login);
 router.post('/logout',         auth, ctrl.logout);
 router.get('/me',              auth, ctrl.getMe);
 router.put('/preferencias',    auth, validate(prefsSchema), ctrl.updatePreferencias);
+router.put('/perfil',          auth, validate(updatePerfilSchema), ctrl.updatePerfil);
+router.put('/password',        auth, validate(changePasswordSchema), ctrl.changePassword);
+router.get('/perfil/stats',    auth, ctrl.getProfileStats);
 
 module.exports = router;

@@ -2,8 +2,8 @@ const recetasService = require('./recetas.service');
 
 async function getCatalogo(req, res, next) {
   try {
-    const { tags, q, semana } = req.query;
-    const recetas = await recetasService.getCatalogo({ tags, q, semana });
+    const { tags, q, semana, categoria, dificultad, cocina } = req.query;
+    const recetas = await recetasService.getCatalogo({ tags, q, semana, categoria, dificultad, cocina });
     res.json({ total: recetas.length, recetas });
   } catch (err) {
     next(err);

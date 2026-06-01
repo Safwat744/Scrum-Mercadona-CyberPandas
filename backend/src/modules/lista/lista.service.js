@@ -42,10 +42,11 @@ async function addRecetaToLista(usuarioId, recetaId, raciones) {
   const racionesBase = recetaRes.rows[0].raciones_base;
   const factor       = raciones / racionesBase;
 
-  // 2. Obtener ingredientes de la receta
+  // 2. Obtener ingredientes de la receta con info del producto
   const ingsRes = await pool.query(
-    `SELECT ir.producto_id, ir.cantidad_base, ir.unidad
+    `SELECT ir.producto_id, ir.cantidad_base, ir.unidad, ph.cantidad_por_envase
      FROM ingredientes_receta ir
+     JOIN productos_hacendado ph ON ph.id = ir.producto_id
      WHERE ir.receta_id = $1`,
     [recetaId]
   );
@@ -66,16 +67,19 @@ async function addRecetaToLista(usuarioId, recetaId, raciones) {
     // 3. Para cada ingrediente: INSERT o suma (ON CONFLICT)
     for (const ing of ingsRes.rows) {
       const cantidadEscalada = parseFloat((ing.cantidad_base * factor).toFixed(3));
+      const envaseBase = Number(ing.cantidad_por_envase) || 1;
+      const calcPaquetes = Math.ceil(cantidadEscalada / envaseBase);
 
       await client.query(
-        `INSERT INTO items_lista (lista_id, producto_id, cantidad_total, unidad)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO items_lista (lista_id, producto_id, cantidad_total, unidad, paquetes_a_comprar)
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (lista_id, producto_id)
          DO UPDATE SET
            cantidad_total = items_lista.cantidad_total + EXCLUDED.cantidad_total,
+           paquetes_a_comprar = COALESCE(items_lista.paquetes_a_comprar, CEIL(items_lista.cantidad_total / $6)) + EXCLUDED.paquetes_a_comprar,
            cogido         = FALSE,
            updated_at     = NOW()`,
-        [listaId, ing.producto_id, cantidadEscalada, ing.unidad]
+        [listaId, ing.producto_id, cantidadEscalada, ing.unidad, calcPaquetes, envaseBase]
       );
     }
 
@@ -115,17 +119,24 @@ async function getLista(usuarioId, agrupada = false) {
        il.updated_at,
        ph.id           AS producto_id,
        ph.nombre       AS producto_nombre,
+       ph.marca        AS producto_marca,
        ph.seccion_tienda,
        ph.precio       AS producto_precio,
        ph.cantidad_por_envase,
-       -- Precio estimado del item en la lista
+       ph.unidad_base,
+       COALESCE(ph.thumbnail_url, ph.foto_url) AS producto_thumbnail_url,
+       COALESCE(ph.image_url, ph.foto_url)     AS producto_image_url,
+       ph.share_url    AS producto_share_url,
+       -- Lógica de paquetes: Si es NULL calculamos el ceiling (legacy), si no usamos el valor real.
+       COALESCE(il.paquetes_a_comprar, CEIL(il.cantidad_total / NULLIF(ph.cantidad_por_envase, 0))) AS paquetes,
+       -- Precio estimado real: precio * paquetes
        ROUND(
-         (il.cantidad_total * ph.precio / ph.cantidad_por_envase)::numeric, 2
-       )               AS precio_estimado
+         (COALESCE(il.paquetes_a_comprar, CEIL(il.cantidad_total / NULLIF(ph.cantidad_por_envase, 0))) * ph.precio)::numeric, 2
+       ) AS precio_total
      FROM items_lista il
      JOIN productos_hacendado ph ON ph.id = il.producto_id
      WHERE il.lista_id = $1
-     ORDER BY il.cogido ASC, ph.seccion_tienda ASC, ph.nombre ASC`,
+     ORDER BY ph.seccion_tienda ASC, ph.nombre ASC`,
     [listaId]
   );
 
@@ -133,20 +144,191 @@ async function getLista(usuarioId, agrupada = false) {
 
   if (!agrupada) return items;
 
-  // Agrupar por sección de tienda (HU-08)
-  const grupos = {};
+  // Agrupar (A comprar vs En Despensa, dentro de comprar agrupar por pasillo)
+  const result = { a_comprar: {}, despensa: [] };
+
   for (const item of items) {
-    const seccion = item.seccion_tienda || 'Otros';
-    if (!grupos[seccion]) grupos[seccion] = [];
-    grupos[seccion].push(item);
+    const pkgs = Number(item.paquetes || 0);
+    
+    // Si paquetes es 0, va directo a la despensa
+    if (pkgs === 0 || item.cogido) {
+      result.despensa.push(item);
+    } else {
+      const seccion = item.seccion_tienda || 'Otros';
+      if (!result.a_comprar[seccion]) result.a_comprar[seccion] = [];
+      result.a_comprar[seccion].push(item);
+    }
   }
 
-  return grupos;
+  return result;
 }
 
 // ─────────────────────────────────────────────
-// MARCAR / DESMARCAR COGIDO (HU-08)
+// ACTUALIZAR PAQUETES DE UN ITEM
 // ─────────────────────────────────────────────
+async function updateItemPaquetes(usuarioId, itemId, paquetes) {
+  const check = await pool.query(
+    `SELECT il.id 
+     FROM items_lista il
+     JOIN listas_compra lc ON lc.id = il.lista_id
+     WHERE il.id = $1 AND lc.usuario_id = $2`,
+    [itemId, usuarioId]
+  );
+
+  if (check.rows.length === 0) {
+    const err = new Error('Item no encontrado en tu lista.');
+    err.status = 404;
+    err.code   = 'ITEM_NOT_FOUND';
+    throw err;
+  }
+
+  await pool.query(
+    'UPDATE items_lista SET paquetes_a_comprar = $1, cogido = false, updated_at = NOW() WHERE id = $2',
+    [Math.max(0, parseInt(paquetes)), itemId]
+  );
+
+  return { id: itemId, paquetes: Math.max(0, parseInt(paquetes)) };
+}
+
+// ─────────────────────────────────────────────
+// OBTENER ALTERNATIVAS PARA UN PRODUCTO
+// ─────────────────────────────────────────────
+async function getAlternativas(productoId) {
+  const pRes = await pool.query('SELECT nombre, seccion_tienda FROM productos_hacendado WHERE id = $1', [productoId]);
+  if (pRes.rows.length === 0) return [];
+  
+  const { nombre, seccion_tienda } = pRes.rows[0];
+  
+  // Usar la primera palabra clave principal
+  const keyword = nombre.split(' ')[0].replace(/[^a-zA-Z0-9]/g, '');
+  
+  // 1. Intento estricto: Misma sección y empieza por la palabra clave
+  let altRes = await pool.query(
+    `SELECT id, nombre, marca, precio, cantidad_por_envase, unidad_base, seccion_tienda, 
+            COALESCE(thumbnail_url, foto_url) AS thumbnail_url
+     FROM productos_hacendado
+     WHERE seccion_tienda = $1 AND id != $2 AND nombre ILIKE $3
+     ORDER BY precio ASC
+     LIMIT 20`,
+    [seccion_tienda, productoId, `${keyword}%`]
+  );
+
+  // 2. Intento relajado: Si no hay resultados (porque la BBDD es pequeña), 
+  // buscamos la palabra clave en cualquier parte del nombre sin importar la sección.
+  if (altRes.rows.length === 0) {
+    altRes = await pool.query(
+      `SELECT id, nombre, marca, precio, cantidad_por_envase, unidad_base, seccion_tienda, 
+              COALESCE(thumbnail_url, foto_url) AS thumbnail_url
+       FROM productos_hacendado
+       WHERE id != $1 AND nombre ILIKE $2
+       ORDER BY precio ASC
+       LIMIT 20`,
+      [productoId, `%${keyword}%`]
+    );
+  }
+  
+  return altRes.rows;
+}
+
+// ─────────────────────────────────────────────
+// SWAP: CAMBIAR UN PRODUCTO POR OTRO EN LA LISTA
+// ─────────────────────────────────────────────
+async function swapItemProducto(usuarioId, itemId, nuevoProductoId) {
+  const check = await pool.query(
+    `SELECT il.id, il.cantidad_total
+     FROM items_lista il
+     JOIN listas_compra lc ON lc.id = il.lista_id
+     WHERE il.id = $1 AND lc.usuario_id = $2`,
+    [itemId, usuarioId]
+  );
+
+  if (check.rows.length === 0) {
+    const err = new Error('Item no encontrado en tu lista.');
+    err.status = 404;
+    err.code   = 'ITEM_NOT_FOUND';
+    throw err;
+  }
+
+  const pRes = await pool.query('SELECT cantidad_por_envase, unidad_base FROM productos_hacendado WHERE id = $1', [nuevoProductoId]);
+  if (pRes.rows.length === 0) {
+    const err = new Error('Producto alternativo no encontrado.');
+    err.status = 404;
+    throw err;
+  }
+
+  const envaseBase = Number(pRes.rows[0].cantidad_por_envase) || 1;
+  const cantTotal = Number(check.rows[0].cantidad_total);
+  const nuevosPaquetes = Math.ceil(cantTotal / envaseBase);
+
+  await pool.query(
+    `UPDATE items_lista 
+     SET producto_id = $1, paquetes_a_comprar = $2, updated_at = NOW() 
+     WHERE id = $3`,
+    [nuevoProductoId, nuevosPaquetes, itemId]
+  );
+
+  return getLista(usuarioId, false);
+}
+
+// ─────────────────────────────────────────────
+// BUSCAR PRODUCTOS LIBRES
+// ─────────────────────────────────────────────
+async function searchProductosLibres(query) {
+  if (!query || query.length < 2) return [];
+  const res = await pool.query(
+    `SELECT id, nombre, marca, precio, cantidad_por_envase, unidad_base, seccion_tienda, 
+            COALESCE(thumbnail_url, foto_url) AS thumbnail_url
+     FROM productos_hacendado
+     WHERE nombre ILIKE $1
+     ORDER BY precio ASC
+     LIMIT 30`,
+    [`%${query}%`]
+  );
+  return res.rows;
+}
+
+// ─────────────────────────────────────────────
+// AÑADIR PRODUCTO MANUAL
+// ─────────────────────────────────────────────
+async function addManualProduct(usuarioId, productoId) {
+  const pRes = await pool.query('SELECT cantidad_por_envase, unidad_base FROM productos_hacendado WHERE id = $1', [productoId]);
+  if (pRes.rows.length === 0) {
+    const err = new Error('Producto no encontrado.');
+    err.status = 404;
+    throw err;
+  }
+
+  const p = pRes.rows[0];
+  const cantidadEnvase = Number(p.cantidad_por_envase) || 1;
+  const unidad = p.unidad_base || 'ud';
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const listaId = await getOrCreateLista(usuarioId, client);
+
+    await client.query(
+      `INSERT INTO items_lista (lista_id, producto_id, cantidad_total, unidad, paquetes_a_comprar)
+       VALUES ($1, $2, $3, $4, 1)
+       ON CONFLICT (lista_id, producto_id)
+       DO UPDATE SET
+         cantidad_total = items_lista.cantidad_total + EXCLUDED.cantidad_total,
+         paquetes_a_comprar = items_lista.paquetes_a_comprar + 1,
+         cogido         = FALSE,
+         updated_at     = NOW()`,
+      [listaId, productoId, cantidadEnvase, unidad]
+    );
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  return getLista(usuarioId, false);
+}
 async function toggleCogido(usuarioId, itemId) {
   // Verificar que el item pertenece a la lista del usuario
   const check = await pool.query(
@@ -213,4 +395,4 @@ async function vaciarLista(usuarioId) {
   );
 }
 
-module.exports = { addRecetaToLista, getLista, toggleCogido, deleteItem, vaciarLista };
+module.exports = { addRecetaToLista, getLista, toggleCogido, deleteItem, vaciarLista, updateItemPaquetes, getAlternativas, swapItemProducto, searchProductosLibres, addManualProduct };

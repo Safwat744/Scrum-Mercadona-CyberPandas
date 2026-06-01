@@ -39,11 +39,36 @@ async function seedRecetas(client) {
   for (const r of recetas) {
     // 1. Insertar receta principal
     const recetaRes = await client.query(
-      `INSERT INTO recetas (nombre, descripcion, foto_url, tiempo_minutos, raciones_base, semana_activa)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT DO NOTHING
+      `INSERT INTO recetas (
+         nombre, descripcion, foto_url, tiempo_minutos, raciones_base, semana_activa,
+         dificultad, categoria, calorias_racion, autor_origen, cocina
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ON CONFLICT (nombre) DO UPDATE SET
+         descripcion = EXCLUDED.descripcion,
+         foto_url = EXCLUDED.foto_url,
+         tiempo_minutos = EXCLUDED.tiempo_minutos,
+         raciones_base = EXCLUDED.raciones_base,
+         semana_activa = EXCLUDED.semana_activa,
+         dificultad = EXCLUDED.dificultad,
+         categoria = EXCLUDED.categoria,
+         calorias_racion = EXCLUDED.calorias_racion,
+         autor_origen = EXCLUDED.autor_origen,
+         cocina = EXCLUDED.cocina
        RETURNING id`,
-      [r.nombre, r.descripcion, r.foto_url || null, r.tiempo_minutos, r.raciones_base, r.semana_activa]
+      [
+        r.nombre,
+        r.descripcion,
+        r.foto_url || null,
+        r.tiempo_minutos,
+        r.raciones_base,
+        r.semana_activa,
+        r.dificultad || null,
+        r.categoria || null,
+        r.calorias_racion || null,
+        r.autor_origen || null,
+        r.cocina || null,
+      ]
     );
 
     if (recetaRes.rows.length === 0) {
@@ -63,6 +88,13 @@ async function seedRecetas(client) {
         [recetaId, tag]
       );
     }
+
+    // Limpiar contenido dependiente para mantener la seed consistente
+    await client.query('DELETE FROM pasos_receta WHERE receta_id = $1', [recetaId]);
+    await client.query('DELETE FROM ingredientes_receta WHERE receta_id = $1', [recetaId]);
+    await client.query('DELETE FROM recetas_consejos WHERE receta_id = $1', [recetaId]);
+    await client.query('DELETE FROM recetas_faq WHERE receta_id = $1', [recetaId]);
+    await client.query('DELETE FROM recetas_reviews WHERE receta_id = $1', [recetaId]);
 
     // 3. Insertar pasos
     for (let i = 0; i < r.pasos.length; i++) {
@@ -87,11 +119,42 @@ async function seedRecetas(client) {
       const productoId = productoRes.rows[0].id;
       await client.query(
         `INSERT INTO ingredientes_receta
-           (receta_id, producto_id, cantidad_base, unidad, nombre_display)
-         VALUES ($1, $2, $3, $4, $5)
+           (receta_id, producto_id, cantidad_base, unidad, nombre_display, grupo)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT DO NOTHING`,
-        [recetaId, productoId, ing.cantidad_base, ing.unidad, ing.nombre_display]
+        [recetaId, productoId, ing.cantidad_base, ing.unidad, ing.nombre_display, ing.grupo || null]
       );
+    }
+
+    // 5. Insertar consejos
+    if (Array.isArray(r.consejos)) {
+      for (let i = 0; i < r.consejos.length; i++) {
+        await client.query(
+          `INSERT INTO recetas_consejos (receta_id, orden, texto) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+          [recetaId, i + 1, r.consejos[i]]
+        );
+      }
+    }
+
+    // 6. Insertar FAQ
+    if (Array.isArray(r.faq)) {
+      for (let i = 0; i < r.faq.length; i++) {
+        await client.query(
+          `INSERT INTO recetas_faq (receta_id, orden, pregunta, respuesta) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+          [recetaId, i + 1, r.faq[i].pregunta, r.faq[i].respuesta]
+        );
+      }
+    }
+
+    // 7. Insertar reviews
+    if (Array.isArray(r.reviews)) {
+      for (const review of r.reviews) {
+        await client.query(
+          `INSERT INTO recetas_reviews (receta_id, usuario, rating, comentario)
+           VALUES ($1, $2, $3, $4)`,
+          [recetaId, review.usuario, review.rating, review.comentario]
+        );
+      }
     }
   }
 

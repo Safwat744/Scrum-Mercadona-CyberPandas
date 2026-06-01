@@ -4,7 +4,7 @@ const pool = require('../../config/database');
 // CATÁLOGO — GET /recetas
 // HU-03 (catálogo) + HU-09 (filtros) + HU-11 (búsqueda)
 // ─────────────────────────────────────────────
-async function getCatalogo({ tags, q, semana }) {
+async function getCatalogo({ tags, q, semana, categoria, dificultad, cocina }) {
   const conditions = [];
   const params     = [];
   let   idx        = 1;
@@ -13,6 +13,21 @@ async function getCatalogo({ tags, q, semana }) {
   if (semana) {
     conditions.push(`r.semana_activa = $${idx++}`);
     params.push(semana);
+  }
+
+  if (categoria) {
+    conditions.push(`r.categoria = $${idx++}`);
+    params.push(categoria);
+  }
+
+  if (dificultad) {
+    conditions.push(`r.dificultad = $${idx++}`);
+    params.push(dificultad);
+  }
+
+  if (cocina) {
+    conditions.push(`r.cocina = $${idx++}`);
+    params.push(cocina);
   }
 
   // Filtro de búsqueda full-text por nombre e ingredientes (HU-11)
@@ -47,10 +62,37 @@ async function getCatalogo({ tags, q, semana }) {
       r.id,
       r.nombre,
       r.descripcion,
-      r.foto_url,
+      COALESCE(
+        r.foto_url,
+        (
+          SELECT COALESCE(ph2.image_url, ph2.thumbnail_url, ph2.foto_url)
+          FROM ingredientes_receta ir2
+          JOIN productos_hacendado ph2 ON ph2.id = ir2.producto_id
+          WHERE ir2.receta_id = r.id
+            AND COALESCE(ph2.image_url, ph2.thumbnail_url, ph2.foto_url) IS NOT NULL
+          ORDER BY CASE
+            WHEN ph2.nombre ILIKE '%aceite%' THEN 9
+            WHEN ph2.nombre ILIKE '%sal%' THEN 9
+            WHEN ph2.nombre ILIKE '%ajo%' THEN 8
+            WHEN ph2.nombre ILIKE '%oregano%' OR ph2.nombre ILIKE '%orégano%' THEN 8
+            WHEN ph2.nombre ILIKE '%pimienta%' THEN 8
+            WHEN ph2.nombre ILIKE '%pimentón%' OR ph2.nombre ILIKE '%pimenton%' THEN 8
+            WHEN ph2.nombre ILIKE '%cebolla%' THEN 7
+            ELSE 0
+          END ASC,
+          ir2.cantidad_base DESC NULLS LAST,
+          ph2.nombre ASC
+          LIMIT 1
+        )
+      ) AS foto_url,
       r.tiempo_minutos,
       r.raciones_base,
       r.semana_activa,
+      r.dificultad,
+      r.categoria,
+      r.calorias_racion,
+      r.autor_origen,
+      r.cocina,
       COALESCE(
         json_agg(DISTINCT rt.tag) FILTER (WHERE rt.tag IS NOT NULL),
         '[]'
@@ -74,8 +116,34 @@ async function getRecetaById(id) {
   // 1. Datos base + tags
   const recetaRes = await pool.query(
     `SELECT
-       r.id, r.nombre, r.descripcion, r.foto_url,
-       r.tiempo_minutos, r.raciones_base, r.semana_activa,
+       r.id,
+       r.nombre,
+       r.descripcion,
+       COALESCE(
+         r.foto_url,
+         (
+           SELECT COALESCE(ph2.image_url, ph2.thumbnail_url, ph2.foto_url)
+           FROM ingredientes_receta ir2
+           JOIN productos_hacendado ph2 ON ph2.id = ir2.producto_id
+           WHERE ir2.receta_id = r.id
+             AND COALESCE(ph2.image_url, ph2.thumbnail_url, ph2.foto_url) IS NOT NULL
+           ORDER BY CASE
+             WHEN ph2.nombre ILIKE '%aceite%' THEN 9
+             WHEN ph2.nombre ILIKE '%sal%' THEN 9
+             WHEN ph2.nombre ILIKE '%ajo%' THEN 8
+             WHEN ph2.nombre ILIKE '%oregano%' OR ph2.nombre ILIKE '%orégano%' THEN 8
+             WHEN ph2.nombre ILIKE '%pimienta%' THEN 8
+             WHEN ph2.nombre ILIKE '%pimentón%' OR ph2.nombre ILIKE '%pimenton%' THEN 8
+             WHEN ph2.nombre ILIKE '%cebolla%' THEN 7
+             ELSE 0
+           END ASC,
+           ir2.cantidad_base DESC NULLS LAST,
+           ph2.nombre ASC
+           LIMIT 1
+         )
+       ) AS foto_url,
+      r.tiempo_minutos, r.raciones_base, r.semana_activa,
+      r.dificultad, r.categoria, r.calorias_racion, r.autor_origen, r.cocina,
        COALESCE(
          json_agg(DISTINCT rt.tag) FILTER (WHERE rt.tag IS NOT NULL),
          '[]'
@@ -103,16 +171,21 @@ async function getRecetaById(id) {
        ir.cantidad_base,
        ir.unidad,
        ir.nombre_display,
+      ir.grupo,
        ph.id           AS producto_id,
        ph.nombre       AS producto_nombre,
+       ph.marca        AS producto_marca,
        ph.precio       AS producto_precio,
        ph.cantidad_por_envase,
        ph.unidad_base  AS producto_unidad_base,
-       ph.seccion_tienda
+       ph.seccion_tienda,
+       COALESCE(ph.thumbnail_url, ph.foto_url) AS producto_thumbnail_url,
+       COALESCE(ph.image_url, ph.foto_url)     AS producto_image_url,
+       ph.share_url    AS producto_share_url
      FROM ingredientes_receta ir
      JOIN productos_hacendado ph ON ph.id = ir.producto_id
      WHERE ir.receta_id = $1
-     ORDER BY ir.nombre_display ASC`,
+     ORDER BY COALESCE(ir.grupo, ''), ir.nombre_display ASC`,
     [id]
   );
 
@@ -125,10 +198,37 @@ async function getRecetaById(id) {
     [id]
   );
 
+  const consejosRes = await pool.query(
+    `SELECT orden, texto
+     FROM recetas_consejos
+     WHERE receta_id = $1
+     ORDER BY orden ASC`,
+    [id]
+  );
+
+  const faqRes = await pool.query(
+    `SELECT orden, pregunta, respuesta
+     FROM recetas_faq
+     WHERE receta_id = $1
+     ORDER BY orden ASC`,
+    [id]
+  );
+
+  const reviewsRes = await pool.query(
+    `SELECT usuario, rating, comentario, created_at
+     FROM recetas_reviews
+     WHERE receta_id = $1
+     ORDER BY created_at DESC`,
+    [id]
+  );
+
   return {
     ...receta,
     ingredientes: ingsRes.rows,
     pasos:        pasosRes.rows,
+    consejos:     consejosRes.rows,
+    faq:          faqRes.rows,
+    reviews:      reviewsRes.rows,
   };
 }
 

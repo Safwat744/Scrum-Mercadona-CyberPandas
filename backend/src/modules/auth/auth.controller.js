@@ -45,4 +45,31 @@ async function updatePreferencias(req, res, next) {
   }
 }
 
-module.exports = { register, login, logout, getMe, updatePreferencias };
+async function updatePerfil(req, res, next) {
+  try {
+    const usuario = await authService.updatePerfil(req.usuario.id, req.body);
+    res.json({ message: 'Perfil actualizado.', usuario });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function changePassword(req, res, next) {
+  try {
+    await authService.changePassword(req.usuario.id, req.body.current_password, req.body.new_password);
+    res.json({ message: 'Contraseña actualizada correctamente.' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getProfileStats(req, res, next) {
+  try {
+    const data = await authService.getProfileStats(req.usuario.id);
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { register, login, logout, getMe, updatePreferencias, updatePerfil, changePassword, getProfileStats };
