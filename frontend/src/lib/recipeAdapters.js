@@ -62,7 +62,39 @@ export function normalizeFavoriteRecipe(recipe) {
   return normalizeCatalogRecipe(recipe);
 }
 
+function buildRatingSummary(reviews = []) {
+  if (!Array.isArray(reviews) || reviews.length === 0) {
+    return { average: 0, count: 0 };
+  }
+  const total = reviews.reduce((acc, review) => acc + toNumber(review.rating), 0);
+  return {
+    average: Math.round((total / reviews.length) * 10) / 10,
+    count: reviews.length,
+  };
+}
+
+// Agrupa ingredientes por su campo `grupo` ("Para el relleno", "Para la bechamel"...)
+// preservando el orden de llegada del backend. Los que no tienen grupo van juntos.
+export function groupIngredients(ingredients = []) {
+  const groups = new Map();
+  for (const ingredient of ingredients) {
+    const key = ingredient.group || 'Ingredientes';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(ingredient);
+  }
+  return Array.from(groups, ([title, items]) => ({ title, items }));
+}
+
 export function normalizeDetailRecipe(recipe, precio = null) {
+  const reviews = Array.isArray(recipe.reviews)
+    ? recipe.reviews.map((review) => ({
+        user: review.usuario,
+        rating: toNumber(review.rating),
+        comment: review.comentario,
+        createdAt: review.created_at || null,
+      }))
+    : [];
+
   return {
     id: recipe.id,
     title: recipe.nombre,
@@ -72,6 +104,7 @@ export function normalizeDetailRecipe(recipe, precio = null) {
     servings: toNumber(recipe.raciones_base),
     difficulty: recipe.dificultad || null,
     category: recipe.categoria || null,
+    cuisine: recipe.cocina || null,
     calories: recipe.calorias_racion || null,
     author: recipe.autor_origen || null,
     tags: Array.isArray(recipe.tags) ? recipe.tags : [],
@@ -83,6 +116,7 @@ export function normalizeDetailRecipe(recipe, precio = null) {
           name: ingredient.nombre_display || ingredient.producto_nombre,
           qty: toNumber(ingredient.cantidad_base),
           unit: ingredient.unidad,
+          group: ingredient.grupo || null,
           section: ingredient.seccion_tienda,
           hacendado: ingredient.producto_id
             ? {
@@ -106,6 +140,18 @@ export function normalizeDetailRecipe(recipe, precio = null) {
           descripcion: step.descripcion,
         }))
       : [],
+    tips: Array.isArray(recipe.consejos)
+      ? recipe.consejos.map((tip) => ({ orden: tip.orden, texto: tip.texto }))
+      : [],
+    faq: Array.isArray(recipe.faq)
+      ? recipe.faq.map((item) => ({
+          orden: item.orden,
+          question: item.pregunta,
+          answer: item.respuesta,
+        }))
+      : [],
+    reviews,
+    rating: buildRatingSummary(reviews),
   };
 }
 
