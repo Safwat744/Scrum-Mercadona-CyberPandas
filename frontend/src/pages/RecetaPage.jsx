@@ -1,239 +1,442 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { getReceta, getPrecio } from '../api/recetas';
-import { addReceta } from '../api/lista';
-import { toggleFavorito } from '../api/favoritos';
-import { PageSpinner, Spinner } from '../components/ui/Spinner';
-import { ToastContainer } from '../components/ui/Toast';
-import { useToast } from '../hooks/useToast';
-
-const CARD_COLORS = ['#FFF3E0','#E8F5E9','#E3F2FD','#FCE4EC','#F3E5F5','#E0F7FA','#FFF8E1'];
-const FOOD_EMOJIS = ['🍳','🥘','🍝','🍲','🥗','🍖','🥙','🍱','🥣','🫕','🍜','🥞'];
-
-const TAG_LABELS = {
-  VEGANO: '🌱 Vegano', VEGETARIANO: '🥦 Vegetariano',
-  SIN_GLUTEN: '🌾 Sin gluten', SIN_LACTOSA: '🥛 Sin lactosa', SIN_HUEVO: '🥚 Sin huevo',
-};
+import { useEffect, useMemo, useState } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { ArrowLeft, Clock, Heart, ShoppingBasket, Check, Package, Maximize2, X, Volume2, ChevronLeft, ChevronRight, Play, Pause } from "lucide-react";
+import { getCatalogo, getPrecio, getReceta } from "@/api/recetas";
+import { getCookingMode } from "@/api/ai";
+import { addReceta } from "@/api/lista";
+import { getFavoritos, toggleFavorito } from "@/api/favoritos";
+import Stepper from "@/components/common/Stepper";
+import RecipeCard from "@/components/common/RecipeCard";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { normalizeCatalogRecipe, normalizeDetailRecipe } from "@/lib/recipeAdapters";
 
 export default function RecetaPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { toasts, addToast } = useToast();
+  const [recipe, setRecipe] = useState(null);
+  const [related, setRelated] = useState([]);
+  const [servings, setServings] = useState(2);
+  const [favorite, setFavorite] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [price, setPrice] = useState(null);
+  const [added, setAdded] = useState(false);
+  const [cookingOpen, setCookingOpen] = useState(false);
 
-  const [receta,   setReceta]   = useState(null);
-  const [loading,  setLoading]  = useState(true);
-  const [raciones, setRaciones] = useState(4);
-  const [precio,   setPrecio]   = useState(null);
-  const [fav,      setFav]      = useState(false);
-  const [adding,   setAdding]   = useState(false);
+  const safeParseNumber = (value, fallback = 0) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
 
   useEffect(() => {
-    getReceta(id)
-      .then(r => { setReceta(r); setRaciones(r.raciones_base); })
-      .catch(() => navigate('/'))
+    setLoading(true);
+    Promise.all([
+      getReceta(id),
+      getCatalogo().catch(() => ({ recetas: [] })),
+      getFavoritos().catch(() => ({ favoritos: [] })),
+      getPrecio(id, 2).catch(() => null),
+    ])
+      .then(([recetaData, catalogData, favoritesData, priceData]) => {
+        const normalizedRecipe = normalizeDetailRecipe(recetaData, priceData);
+        setRecipe(normalizedRecipe);
+        setServings(safeParseNumber(recetaData.raciones_base, normalizedRecipe.servings || 2));
+        setPrice(priceData);
+        setFavorite((favoritesData.favoritos || []).some((item) => item.id === recetaData.id));
+        setRelated(
+          (catalogData.recetas || [])
+            .filter((item) => item.id !== recetaData.id)
+            .slice(0, 3)
+            .map(normalizeCatalogRecipe),
+        );
+      })
+      .catch(() => setRecipe(null))
       .finally(() => setLoading(false));
   }, [id]);
 
   useEffect(() => {
-    if (!receta) return;
-    getPrecio(id, raciones).then(setPrecio).catch(() => {});
-  }, [id, raciones, receta]);
+    if (!recipe) return;
+    getPrecio(id, servings)
+      .then((data) => setPrice(data))
+      .catch(() => setPrice(null));
+  }, [id, servings, recipe]);
 
-  const handleAddToList = async () => {
-    setAdding(true);
+  if (!loading && !recipe) {
+    return (
+      <div className="container-app py-20 text-center">
+        <h2 className="display-md">Receta no encontrada.</h2>
+        <Link to="/catalogo" className="link-editorial mt-4 inline-block">Volver al catálogo</Link>
+      </div>
+    );
+  }
+
+  if (loading || !recipe) {
+    return (
+      <div className="container-app py-20">
+        <div className="rounded-2xl border border-rule bg-paper-raised overflow-hidden">
+          <div className="skeleton-block aspect-[16/8]" />
+          <div className="p-8 space-y-4">
+            <div className="skeleton-block h-4 w-24" />
+            <div className="skeleton-block h-10 w-2/3" />
+            <div className="skeleton-block h-5 w-1/2" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const ratio = servings / recipe.servings;
+  const hacendadoCount = recipe.ingredients.filter((ingredient) => ingredient.hacendado).length;
+  const estimatedListPrice = recipe.ingredients.reduce(
+    (acc, ingredient) => acc + (ingredient.hacendado?.price || 0),
+    0
+  );
+
+  const handleAdd = async () => {
     try {
-      await addReceta(id, raciones);
-      addToast(`¡Ingredientes añadidos a tu lista! (${raciones} raciones)`, 'success');
+      await addReceta(id, servings);
+      setAdded(true);
+      toast.success(`Ingredientes añadidos a tu lista.`, {
+        description: `Listos para comprar en Mercadona para ${servings} raciones.`,
+      });
+      window.setTimeout(() => setAdded(false), 2400);
     } catch {
-      addToast('Error al añadir a la lista. Inténtalo de nuevo.', 'error');
-    } finally {
-      setAdding(false);
+      toast.error("No hemos podido añadir esta receta a tu lista.");
     }
   };
 
-  const handleFav = async () => {
+  const handleToggleFavorite = async () => {
     try {
-      const res = await toggleFavorito(id);
-      setFav(res.favorito);
-      addToast(res.favorito ? 'Añadida a favoritas ❤️' : 'Eliminada de favoritas', 'success');
+      const result = await toggleFavorito(id);
+      setFavorite(result.favorito);
     } catch {}
   };
 
-  if (loading) return <div style={{ paddingTop: 100 }}><PageSpinner /></div>;
-  if (!receta) return null;
+  return (
+    <article data-testid="receta-page">
+      {/* Back nav */}
+      <div className="container-app pt-6">
+        <button
+          onClick={() => navigate(-1)}
+          className="inline-flex items-center gap-2 text-sm text-ink-soft hover:text-ink transition-colors"
+          data-testid="back-btn"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Volver
+        </button>
+      </div>
 
-  const colorIdx = receta.nombre.charCodeAt(0) % CARD_COLORS.length;
-  const emojiIdx = receta.nombre.charCodeAt(0) % FOOD_EMOJIS.length;
+      {/* Editorial hero */}
+      <header className="container-app mt-6 grid md:grid-cols-12 gap-8 md:gap-12 items-start">
+        <div className="md:col-span-6 lg:col-span-7">
+          <div className="relative aspect-[4/5] bg-paper-deep rounded-2xl overflow-hidden grain">
+            <img
+              src={recipe.image}
+              alt=""
+              className="h-full w-full object-cover"
+              onError={(e) => (e.currentTarget.style.opacity = 0)}
+            />
+          </div>
+        </div>
+
+        <div className="md:col-span-6 lg:col-span-5 md:sticky md:top-24 self-start">
+          <p className="eyebrow">{recipe.eyebrow}</p>
+          <h1 className="display-xl mt-3 text-balance">{recipe.title}</h1>
+          {recipe.author && (
+            <p className="meta-mono mt-3 text-ink-soft">Por {recipe.author}</p>
+          )}
+          <p className="mt-5 text-ink-soft text-[15px] leading-relaxed max-w-md">{recipe.description}</p>
+
+          <dl className="mt-8 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 hairline-t hairline-b py-5 gap-2">
+            <Meta term="Tiempo" value={`${recipe.time} min`} icon={<Clock className="h-3.5 w-3.5" />} />
+            <Meta term="Raciones" value={`${recipe.servings} base`} />
+            <Meta term="Dificultad" value={recipe.difficulty || "—"} />
+            <Meta term="Calorías" value={recipe.calories ? `${recipe.calories} kcal` : "—"} />
+            <Meta term="Precio" value={price?.precio_display || "—"} highlight />
+          </dl>
+
+          <div className="mt-7 flex items-center justify-between">
+            <div>
+              <p className="label-cap text-ink-soft">Raciones ({recipe.servings} base)</p>
+              <div className="mt-2">
+                <Stepper value={servings} onChange={setServings} min={1} max={12} testid="servings-stepper" />
+              </div>
+            </div>
+            <button
+              onClick={handleToggleFavorite}
+              aria-pressed={favorite}
+              data-testid="fav-toggle"
+              className="h-11 w-11 rounded-full border border-rule hover:border-ink grid place-items-center transition-colors"
+              aria-label="Favorita"
+            >
+              <Heart className={`h-5 w-5 ${favorite ? "fill-tomate text-tomate" : "text-ink"}`} />
+            </button>
+          </div>
+
+          <Button
+            size="xl"
+            onClick={handleAdd}
+            className="mt-7 w-full"
+            data-testid="add-to-list"
+          >
+            {added ? (
+              <>
+                <Check className="h-4 w-4" />
+                Añadido a tu lista
+              </>
+            ) : (
+              <>
+                <ShoppingBasket className="h-4 w-4" />
+                Añadir ingredientes a la lista
+              </>
+            )}
+          </Button>
+
+          <Button
+            size="lg"
+            variant="outline"
+            onClick={() => setCookingOpen(true)}
+            className="mt-3 w-full"
+            data-testid="open-cooking-mode"
+          >
+            <Maximize2 className="h-4 w-4" />
+            Abrir modo cocina
+          </Button>
+
+          <p className="meta-mono mt-3 text-center">
+            {hacendadoCount} de {recipe.ingredients.length} con producto Hacendado · ~
+            <span className="text-ink">{estimatedListPrice.toFixed(2)} €</span> estimado
+          </p>
+        </div>
+      </header>
+
+      {/* Body: ingredients (sticky) + steps */}
+      <section className="container-app mt-20 grid md:grid-cols-12 gap-12">
+        {/* Ingredients */}
+        <aside className="md:col-span-5 lg:col-span-4 md:sticky md:top-24 self-start" data-testid="ingredients">
+          <p className="eyebrow">Ingredientes</p>
+          <h2 className="display-md mt-2">Para {servings} raciones.</h2>
+          <ul className="mt-6 divide-y divide-rule border-y border-rule">
+            {recipe.ingredients.map((ing) => {
+              const qty = typeof ing.qty === "number" ? +(ing.qty * ratio).toFixed(2) : ing.qty;
+              return (
+                <li key={ing.id} className="py-3.5 flex items-center gap-3" data-testid={`ing-${ing.id}`}>
+                  {ing.hacendado?.thumbnail ? (
+                    <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-paper-deep border border-rule">
+                      <img src={ing.hacendado.thumbnail} alt="" className="h-full w-full object-cover" loading="lazy" />
+                    </div>
+                  ) : (
+                    <div className="h-12 w-12 shrink-0 rounded-xl bg-paper-deep border border-rule" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[15px] text-ink">{ing.name}</p>
+                    {ing.hacendado && (
+                      <p className="meta-mono mt-1 inline-flex items-center gap-1.5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-mercadona" />
+                        {ing.hacendado.brand} · {ing.hacendado.price.toFixed(2)} €
+                      </p>
+                    )}
+                  </div>
+                  <span className="num-mono text-sm text-ink whitespace-nowrap">
+                    {qty} {ing.unit}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </aside>
+
+        {/* Steps */}
+        <div className="md:col-span-7 lg:col-span-8 prose-recipe" data-testid="steps">
+          <p className="eyebrow">Preparación</p>
+          <h2 className="display-md mt-2">Paso a paso.</h2>
+          <ol className="mt-8 space-y-10">
+            {recipe.steps.map((s, i) => (
+              <li key={s.orden} className="grid grid-cols-[auto_1fr] gap-6 items-start">
+                <span className="display-md text-ink-soft tabular-nums leading-none pt-1" style={{ fontStyle: "italic" }}>
+                  {String(s.orden).padStart(2, "0")}
+                </span>
+                <p className="text-[17px] leading-[1.7] text-ink">{s.descripcion}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      {/* Pairing */}
+      {related.length > 0 && (
+        <section className="container-app mt-24 pb-16">
+          <header className="flex items-end justify-between">
+            <div>
+              <p className="eyebrow">Combina bien con</p>
+              <h2 className="display-lg mt-2">Otras tres ideas.</h2>
+            </div>
+          </header>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-10">
+            {related.map((r) => (
+              <RecipeCard key={r.id} recipe={r} />
+            ))}
+          </div>
+        </section>
+      )}
+      <CookingModeOverlay
+        open={cookingOpen}
+        onOpenChange={setCookingOpen}
+        recipe={recipe}
+        servings={servings}
+      />
+    </article>
+  );
+}
+
+function Meta({ term, value, icon, highlight }) {
+  return (
+    <div>
+      <dt className="meta-mono inline-flex items-center gap-1">{icon}{term}</dt>
+      <dd className={`mt-1 num-mono text-[15px] ${highlight ? "text-tomate" : "text-ink"}`}>{value}</dd>
+    </div>
+  );
+}
+
+function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
+  const [mode, setMode] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [index, setIndex] = useState(0);
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    if (!open || !recipe) return;
+    setLoading(true);
+    getCookingMode({ recetaId: recipe.id, raciones: servings })
+      .then((data) => {
+        setMode(data);
+        setIndex(0);
+        setSecondsLeft(data.pasos?.[0]?.duracion_segundos || 60);
+      })
+      .catch(() => {
+        setMode({
+          titulo: recipe.title,
+          intro_tts: `Empezamos con ${recipe.title}.`,
+          pasos: recipe.steps.map((step) => ({
+            orden: step.orden,
+            titulo: `Paso ${step.orden}`,
+            narracion: step.descripcion,
+            duracion_segundos: 60,
+            timer_recomendado: false,
+          })),
+          cierre_tts: "Receta terminada.",
+        });
+        setIndex(0);
+        setSecondsLeft(60);
+      })
+      .finally(() => setLoading(false));
+  }, [open, recipe, servings]);
+
+  useEffect(() => {
+    if (!running || secondsLeft <= 0) return;
+    const timer = window.setInterval(() => setSecondsLeft((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [running, secondsLeft]);
+
+  useEffect(() => {
+    const step = mode?.pasos?.[index];
+    setSecondsLeft(step?.duracion_segundos || 60);
+    setRunning(false);
+  }, [index, mode]);
+
+  if (!open) return null;
+
+  const steps = mode?.pasos || [];
+  const current = steps[index];
+  const canPrev = index > 0;
+  const canNext = index < steps.length - 1;
+  const minutes = Math.floor(secondsLeft / 60);
+  const seconds = String(secondsLeft % 60).padStart(2, "0");
+
+  const speak = (value) => {
+    if (!window.speechSynthesis || !value) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(value);
+    utterance.lang = "es-ES";
+    utterance.rate = 0.92;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const close = () => {
+    window.speechSynthesis?.cancel();
+    onOpenChange(false);
+  };
 
   return (
-    <div style={{ paddingBottom: 60 }}>
-      {/* Hero */}
-      <div style={{
-        height: 320, background: CARD_COLORS[colorIdx],
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 96, position: 'relative', overflow: 'hidden',
-      }}>
-        {receta.foto_url
-          ? <img src={receta.foto_url} alt={receta.nombre} style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', inset: 0 }} />
-          : <span style={{ filter: 'drop-shadow(0 8px 20px rgba(0,0,0,0.15))' }}>{FOOD_EMOJIS[emojiIdx]}</span>
-        }
-        {/* Gradiente inferior */}
-        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 80, background: 'linear-gradient(transparent, rgba(0,0,0,0.08))' }} />
+    <div className="fixed inset-0 z-50 bg-ink text-paper" data-testid="cooking-mode">
+      <div className="absolute inset-0">
+        <img src={recipe.image} alt="" className="h-full w-full object-cover opacity-25" />
+        <div className="absolute inset-0 bg-gradient-to-b from-ink/80 via-ink/95 to-ink" />
       </div>
-
-      <div className="container" style={{ paddingTop: 28 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 40, alignItems: 'start' }}>
-
-          {/* COLUMNA IZQUIERDA */}
+      <div className="relative z-10 min-h-screen flex flex-col px-6 py-5 md:px-10">
+        <header className="flex items-center justify-between gap-4">
           <div>
-            {/* Tags */}
-            {receta.tags?.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
-                {receta.tags.map(t => (
-                  <span key={t} style={{ fontSize: 12, fontWeight: 600, padding: '3px 10px', background: 'var(--green-light)', color: 'var(--green-dark)', borderRadius: 'var(--radius-full)' }}>
-                    {TAG_LABELS[t] || t}
-                  </span>
-                ))}
-              </div>
-            )}
+            <p className="text-xs uppercase tracking-[0.2em] text-paper/55">Modo cocina</p>
+            <h2 className="text-xl md:text-2xl font-semibold mt-1">{mode?.titulo || recipe.title}</h2>
+          </div>
+          <button onClick={close} className="h-11 w-11 rounded-full bg-white/10 grid place-items-center hover:bg-white/15" aria-label="Cerrar">
+            <X className="h-5 w-5" />
+          </button>
+        </header>
 
-            {/* Título */}
-            <h1 style={{ fontSize: 28, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.02em', lineHeight: 1.2, marginBottom: 12 }}>
-              {receta.nombre}
-            </h1>
-
-            {/* Meta */}
-            <div style={{ display: 'flex', gap: 20, marginBottom: 16 }}>
-              <span style={{ fontSize: 14, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                ⏱ <strong style={{ color: 'var(--text-primary)' }}>{receta.tiempo_minutos} min</strong>
-              </span>
-              <span style={{ fontSize: 14, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                👥 <strong style={{ color: 'var(--text-primary)' }}>{receta.raciones_base} raciones base</strong>
-              </span>
+        <main className="flex-1 grid place-items-center py-8">
+          {loading || !current ? (
+            <div className="text-center">
+              <p className="text-3xl font-semibold">Preparando modo cocina…</p>
+              <p className="mt-3 text-paper/60">Adaptando pasos para narración y temporizadores.</p>
             </div>
-
-            {receta.descripcion && (
-              <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: 28, maxWidth: 600 }}>
-                {receta.descripcion}
+          ) : (
+            <div className="w-full max-w-4xl">
+              <div className="flex items-center justify-between text-paper/60 text-sm">
+                <span>Paso {index + 1} de {steps.length}</span>
+                <span>{current.timer_recomendado ? "Timer recomendado" : "Sin timer obligatorio"}</span>
+              </div>
+              <div className="mt-5 h-1 rounded-full bg-white/10 overflow-hidden">
+                <div className="h-full bg-mercadona" style={{ width: `${((index + 1) / steps.length) * 100}%` }} />
+              </div>
+              <h1 className="mt-10 text-[clamp(2.2rem,6vw,5rem)] font-bold leading-[0.98] tracking-[-0.04em] text-balance">
+                {current.titulo}
+              </h1>
+              <p className="mt-7 text-xl md:text-2xl leading-relaxed text-paper/80 max-w-3xl">
+                {current.narracion}
               </p>
-            )}
-
-            <div className="divider" />
-
-            {/* Ingredientes */}
-            <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-              🧺 Ingredientes
-              <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--text-muted)' }}>para {raciones} personas</span>
-            </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 32 }}>
-              {receta.ingredientes.map((ing, i) => {
-                const factor    = raciones / receta.raciones_base;
-                const cantidad  = parseFloat((ing.cantidad_base * factor).toFixed(1));
-                const ppu       = ing.producto_precio / ing.cantidad_por_envase;
-                const costoIng  = (cantidad * ppu).toFixed(2);
-                return (
-                  <div key={ing.id} style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '11px 16px',
-                    background: i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-page)',
-                    borderBottom: i < receta.ingredientes.length - 1 ? '1px solid var(--border)' : 'none',
-                    gap: 12,
-                  }}>
-                    <span style={{ fontSize: 14, color: 'var(--text-primary)', fontWeight: 500 }}>
-                      {ing.nombre_display || ing.producto_nombre}
-                    </span>
-                    <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexShrink: 0 }}>
-                      <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600 }}>
-                        {cantidad} {ing.unidad}
-                      </span>
-                      <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 48, textAlign: 'right' }}>
-                        ~{costoIng} €
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Pasos */}
-            <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-              📋 Preparación
-            </h2>
-            <ol style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {receta.pasos.map(p => (
-                <li key={p.orden} style={{ display: 'flex', gap: 14 }}>
-                  <span style={{
-                    width: 28, height: 28, borderRadius: '50%', background: 'var(--green)',
-                    color: '#fff', fontWeight: 700, fontSize: 13,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2,
-                  }}>{p.orden}</span>
-                  <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.7 }}>{p.descripcion}</p>
-                </li>
-              ))}
-            </ol>
-          </div>
-
-          {/* COLUMNA DERECHA — Sticky panel */}
-          <div style={{ position: 'sticky', top: 110 }}>
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 24, boxShadow: 'var(--shadow-card)' }}>
-              {/* Precio */}
-              <div style={{ textAlign: 'center', marginBottom: 20 }}>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, fontWeight: 500 }}>
-                  PRECIO ESTIMADO
-                </div>
-                <div className="price-badge" style={{ fontSize: 26, padding: '10px 20px', justifyContent: 'center' }}>
-                  💶 {precio ? precio.precio_display : '...'}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
-                  con productos Hacendado
-                </div>
-              </div>
-
-              <div className="divider" style={{ margin: '16px 0' }} />
-
-              {/* Control de raciones */}
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 10, textAlign: 'center' }}>
-                  NÚMERO DE RACIONES
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 20 }}>
-                  <button onClick={() => setRaciones(r => Math.max(1, r - 1))}
-                    style={{ width: 36, height: 36, borderRadius: '50%', border: '2px solid var(--green)', color: 'var(--green)', fontSize: 20, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: 'var(--bg-card)', transition: 'var(--transition)' }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--green)'; e.currentTarget.style.color = '#fff'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-card)'; e.currentTarget.style.color = 'var(--green)'; }}>
-                    −
-                  </button>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1 }}>{raciones}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>personas</div>
-                  </div>
-                  <button onClick={() => setRaciones(r => Math.min(20, r + 1))}
-                    style={{ width: 36, height: 36, borderRadius: '50%', border: '2px solid var(--green)', color: 'var(--green)', fontSize: 20, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: 'var(--bg-card)', transition: 'var(--transition)' }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--green)'; e.currentTarget.style.color = '#fff'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-card)'; e.currentTarget.style.color = 'var(--green)'; }}>
-                    +
-                  </button>
-                </div>
-              </div>
-
-              {/* Botones */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <button className="btn btn-primary btn-full btn-lg" onClick={handleAddToList} disabled={adding}>
-                  {adding ? <><Spinner /> Añadiendo...</> : '🛒 Añadir a mi lista'}
+              <div className="mt-10 flex flex-wrap items-center gap-3">
+                <button onClick={() => speak(current.narracion)} className="h-12 px-5 rounded-full bg-white text-ink font-medium inline-flex items-center gap-2">
+                  <Volume2 className="h-4 w-4" />
+                  Narrar paso
                 </button>
-                <button onClick={handleFav}
-                  className={`btn btn-full ${fav ? 'btn-secondary' : 'btn-ghost'}`}
-                  style={{ border: fav ? undefined : '1px solid var(--border)' }}>
-                  {fav ? '❤️ En favoritas' : '🤍 Guardar en favoritas'}
+                <button onClick={() => setRunning((value) => !value)} className="h-12 px-5 rounded-full bg-white/10 border border-white/15 font-medium inline-flex items-center gap-2">
+                  {running ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                  {minutes}:{seconds}
                 </button>
               </div>
             </div>
-          </div>
+          )}
+        </main>
 
-        </div>
+        <footer className="flex items-center justify-between gap-4">
+          <button
+            onClick={() => canPrev && setIndex((value) => value - 1)}
+            disabled={!canPrev}
+            className="h-12 px-5 rounded-full bg-white/10 disabled:opacity-35 inline-flex items-center gap-2"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Anterior
+          </button>
+          <button
+            onClick={() => canNext ? setIndex((value) => value + 1) : speak(mode?.cierre_tts)}
+            className="h-12 px-5 rounded-full bg-mercadona text-white inline-flex items-center gap-2"
+          >
+            {canNext ? "Siguiente paso" : "Finalizar"}
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </footer>
       </div>
-
-      <ToastContainer toasts={toasts} />
     </div>
   );
 }

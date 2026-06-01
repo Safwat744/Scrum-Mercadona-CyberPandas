@@ -1,86 +1,199 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { setPrefs } from '../api/auth';
-import { useAuth } from '../context/AuthContext';
-import { Spinner } from '../components/ui/Spinner';
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { ArrowRight, Camera, ArrowLeft, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { setPrefs } from "@/api/auth";
+import { useAuth } from "@/context/AuthContext";
 
-const OPCIONES = [
-  { key: 'VEGANO',      label: 'Vegano',       emoji: '🌱', desc: 'Sin productos de origen animal' },
-  { key: 'VEGETARIANO', label: 'Vegetariano',  emoji: '🥦', desc: 'Sin carne ni pescado' },
-  { key: 'SIN_GLUTEN',  label: 'Sin gluten',   emoji: '🌾', desc: 'Apto para celíacos' },
-  { key: 'SIN_LACTOSA', label: 'Sin lactosa',  emoji: '🥛', desc: 'Sin lácteos' },
-  { key: 'SIN_HUEVO',   label: 'Sin huevo',    emoji: '🥚', desc: 'Apto para alérgicos al huevo' },
+const DIETS = [
+  { label: "Vegetariana", key: "VEGETARIANO" },
+  { label: "Vegana", key: "VEGANO" },
+  { label: "Sin gluten", key: "SIN_GLUTEN" },
+  { label: "Sin lactosa", key: "SIN_LACTOSA" },
+  { label: "Sin huevo", key: "SIN_HUEVO" },
 ];
 
 export default function OnboardingPage() {
-  const { usuario, updateUsuario } = useAuth();
+  const { updateUsuario } = useAuth();
   const navigate = useNavigate();
-  const [selected, setSelected] = useState([]);
-  const [loading,  setLoading]  = useState(false);
+  const [step, setStep] = useState(1);
+  const [frequency, setFrequency] = useState(4);
+  const [diets, setDiets] = useState(new Set());
 
-  const toggle = (key) =>
-    setSelected(s => s.includes(key) ? s.filter(k => k !== key) : [...s, key]);
+  const toggleDiet = (d) => {
+    const next = new Set(diets);
+    next.has(d) ? next.delete(d) : next.add(d);
+    setDiets(next);
+  };
 
-  const handleSave = async () => {
-    setLoading(true);
+  const next = () => setStep((s) => Math.min(4, s + 1));
+  const back = () => setStep((s) => Math.max(1, s - 1));
+  const skip = async () => {
     try {
-      await setPrefs(selected);
-      updateUsuario({ onboarding_done: true, preferencias: selected });
-      navigate('/');
+      await setPrefs([]);
+      updateUsuario({ onboarding_done: true, preferencias: [] });
     } catch {}
-    finally { setLoading(false); }
+    navigate("/");
+  };
+
+  const finish = async () => {
+    const preferencias = [...diets];
+    try {
+      await setPrefs(preferencias);
+      updateUsuario({ onboarding_done: true, preferencias });
+    } catch {}
+    navigate("/");
   };
 
   return (
-    <div style={{
-      minHeight: '100vh', background: 'linear-gradient(135deg, var(--green-subtle) 0%, #fff 60%)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-    }}>
-      <div style={{ width: '100%', maxWidth: 520 }}>
-        {/* Header */}
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ fontSize: 52, marginBottom: 12 }}>👋</div>
-          <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
-            ¡Hola{usuario?.nombre ? `, ${usuario.nombre}` : ''}!
-          </h1>
-          <p style={{ fontSize: 15, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.5 }}>
-            ¿Tienes alguna preferencia alimentaria?<br />
-            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Personalizaremos las recetas para ti. Puedes cambiarlas después.</span>
-          </p>
+    <div className="min-h-screen bg-paper flex flex-col" data-testid="onboarding-page">
+      {/* Progress + skip */}
+      <header className="container-app pt-8 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {[1, 2, 3, 4].map((n) => (
+            <span
+              key={n}
+              className={`h-1 w-10 rounded-full transition-colors ${
+                step >= n ? "bg-ink" : "bg-rule"
+              }`}
+            />
+          ))}
         </div>
+        <button onClick={skip} className="text-sm text-ink-soft hover:text-ink" data-testid="onb-skip">
+          Saltar
+        </button>
+      </header>
 
-        {/* Opciones */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 28 }}>
-          {OPCIONES.map(op => {
-            const isActive = selected.includes(op.key);
-            return (
-              <button key={op.key} onClick={() => toggle(op.key)} style={{
-                display: 'flex', alignItems: 'center', gap: 14,
-                padding: '14px 18px', borderRadius: 10,
-                border: `2px solid ${isActive ? 'var(--green)' : 'var(--border)'}`,
-                background: isActive ? 'var(--green-light)' : 'var(--bg-card)',
-                cursor: 'pointer', transition: 'var(--transition)', textAlign: 'left',
-              }}>
-                <span style={{ fontSize: 28, width: 36, textAlign: 'center' }}>{op.emoji}</span>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 14, color: isActive ? 'var(--green-dark)' : 'var(--text-primary)' }}>{op.label}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>{op.desc}</div>
-                </div>
-                <div style={{ marginLeft: 'auto', width: 20, height: 20, borderRadius: '50%', border: `2px solid ${isActive ? 'var(--green)' : 'var(--border)'}`, background: isActive ? 'var(--green)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  {isActive && <span style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>✓</span>}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+      <main className="flex-1 grid place-items-center px-6">
+        <div className="w-full max-w-2xl py-12">
+          {step === 1 && (
+            <div className="animate-fade-in">
+              <p className="eyebrow">01 · Tus hábitos</p>
+              <h1 className="display-xl mt-4 text-balance">
+                ¿Cuántas veces cocinas en casa a la semana?
+              </h1>
+              <p className="text-ink-soft mt-4 text-[15px] max-w-xl">
+                Esto nos ayuda a calibrar el ritmo de tus sugerencias y tu lista de compra.
+              </p>
 
-        {/* Acciones */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <button className="btn btn-primary btn-full btn-lg" onClick={handleSave} disabled={loading}>
-            {loading ? <><Spinner /> Guardando...</> : selected.length > 0 ? `Guardar preferencias (${selected.length})` : 'Continuar sin preferencias'}
-          </button>
+              <div className="mt-12">
+                <div className="flex items-baseline gap-3">
+                  <span className="display-xl num-mono">{frequency}</span>
+                  <span className="text-ink-soft">veces</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={7}
+                  step={1}
+                  value={frequency}
+                  onChange={(e) => setFrequency(+e.target.value)}
+                  className="mt-6 w-full accent-tomate"
+                  data-testid="onb-frequency"
+                />
+                <div className="meta-mono flex justify-between mt-2">
+                  <span>1 / casi nunca</span>
+                  <span>7 / a diario</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="animate-fade-in">
+              <p className="eyebrow">02 · Lo que no</p>
+              <h1 className="display-xl mt-4 text-balance">¿Hay algo que no comes?</h1>
+              <p className="text-ink-soft mt-4 text-[15px] max-w-xl">
+                Selecciona todo lo que aplique. Filtraremos cualquier receta que no encaje.
+              </p>
+              <div className="mt-10 flex flex-wrap gap-2">
+                {DIETS.map((diet) => {
+                  const on = diets.has(diet.key);
+                  return (
+                    <button
+                      key={diet.key}
+                      onClick={() => toggleDiet(diet.key)}
+                      data-testid={`diet-${diet.key.toLowerCase()}`}
+                      className={`px-4 h-10 rounded-full text-sm border transition-colors ${
+                        on
+                          ? "bg-ink text-paper border-ink"
+                          : "bg-paper-raised text-ink border-rule hover:border-ink"
+                      }`}
+                    >
+                      {on && <Check className="inline h-3.5 w-3.5 mr-1" />}
+                      {diet.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="animate-fade-in">
+              <p className="eyebrow">03 · Tu despensa</p>
+              <h1 className="display-xl mt-4 text-balance">
+                ¿Empezamos contándonos qué ya tienes en casa?
+              </h1>
+              <p className="text-ink-soft mt-4 text-[15px] max-w-xl">
+                Saca una foto a tu despensa o nevera. Detectaremos los productos y construiremos tus primeras sugerencias.
+              </p>
+
+              <div className="mt-10 grid sm:grid-cols-2 gap-4">
+                <Button size="xl" data-testid="onb-scan">
+                  <Camera className="h-5 w-5" />
+                  Hacer foto
+                </Button>
+                <Button size="xl" variant="outline" onClick={next} data-testid="onb-later">
+                  Lo hago después
+                </Button>
+              </div>
+
+              <p className="meta-mono mt-6">Podrás escanear tu despensa en cualquier momento desde la barra superior.</p>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="animate-fade-in text-center">
+              <p className="eyebrow">Listo</p>
+              <h1 className="display-xl mt-4 text-balance">Tu cocina, ordenada.</h1>
+              <p className="text-ink-soft mt-4 text-[15px] max-w-md mx-auto">
+                Hemos calibrado tu experiencia. A partir de aquí, cuanto más uses Recetas Hacendado, mejor te conocerá.
+              </p>
+              <Button
+                size="xl"
+                onClick={finish}
+                className="mt-10 min-w-[240px]"
+                data-testid="onb-finish"
+              >
+                Empezar
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </div>
-      </div>
+      </main>
+
+      {/* Footer nav */}
+      {step < 4 && (
+        <footer className="container-app pb-10 flex items-center justify-between">
+          <Button
+            variant="ghost"
+            size="lg"
+            onClick={back}
+            disabled={step === 1}
+            data-testid="onb-back"
+            className={step === 1 ? "invisible" : ""}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Atrás
+          </Button>
+          <Button size="lg" onClick={next} data-testid="onb-next">
+            Continuar
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+        </footer>
+      )}
     </div>
   );
 }

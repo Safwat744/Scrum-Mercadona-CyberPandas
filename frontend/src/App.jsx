@@ -1,19 +1,19 @@
-import { useState, useEffect } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { useState } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import { useAuth } from './context/AuthContext';
-import { getLista } from './api/lista';
-
-import { Header }       from './components/Header';
-import { SecondaryNav } from './components/SecondaryNav';
-import { PageSpinner }  from './components/ui/Spinner';
-
-import LoginPage     from './pages/LoginPage';
-import RegisterPage  from './pages/RegisterPage';
+import { PageSpinner } from './components/ui/Spinner';
+import AppShell from './components/layout/AppShell';
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
 import OnboardingPage from './pages/OnboardingPage';
-import CatalogoPage  from './pages/CatalogoPage';
-import RecetaPage    from './pages/RecetaPage';
-import ListaPage     from './pages/ListaPage';
+import HomePage from './pages/HomePage';
+import CatalogoPage from './pages/CatalogoPage';
+import RecetaPage from './pages/RecetaPage';
+import ListaPage from './pages/ListaPage';
 import FavoritasPage from './pages/FavoritasPage';
+import PlanificadorPage from './pages/PlanificadorPage';
+import ProfilePage from './pages/ProfilePage';
 
 // Ruta protegida
 function PrivateRoute({ children }) {
@@ -24,28 +24,10 @@ function PrivateRoute({ children }) {
   return children;
 }
 
-// Layout principal con header
-function MainLayout({ children }) {
-  const [search,     setSearch]     = useState('');
-  const [listaCount, setListaCount] = useState(0);
-  const location = useLocation();
+function ProductLayout() {
+  const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    getLista(false)
-      .then(d => setListaCount(d.total || 0))
-      .catch(() => {});
-  }, [location.pathname]);
-
-  return (
-    <>
-      <Header searchValue={search} onSearchChange={setSearch} listaCount={listaCount} />
-      <SecondaryNav />
-      <div className="page-wrapper">
-        {/* Pasar searchValue a CatalogoPage mediante el árbol */}
-        {children({ search })}
-      </div>
-    </>
-  );
+  return <AppShell searchValue={search} onSearchChange={setSearch} />;
 }
 
 export default function App() {
@@ -53,29 +35,44 @@ export default function App() {
   if (loading) return <PageSpinner />;
 
   return (
-    <Routes>
-      {/* Rutas públicas */}
-      <Route path="/login"    element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route path="/onboarding" element={<OnboardingPage />} />
+    <>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/onboarding" element={<OnboardingPage />} />
 
-      {/* Rutas privadas con layout */}
-      <Route path="/*" element={
-        <PrivateRoute>
-          <MainLayout>
-            {({ search }) => (
-              <Routes>
-                <Route path="/"          element={<CatalogoPage searchValue={search} />} />
-                <Route path="/catalogo"  element={<CatalogoPage searchValue={search} />} />
-                <Route path="/recetas/:id" element={<RecetaPage />} />
-                <Route path="/lista"     element={<ListaPage />} />
-                <Route path="/favoritas" element={<FavoritasPage />} />
-                <Route path="*"          element={<Navigate to="/" replace />} />
-              </Routes>
-            )}
-          </MainLayout>
-        </PrivateRoute>
-      } />
-    </Routes>
+        <Route
+          element={
+            <PrivateRoute>
+              <ProductLayout />
+            </PrivateRoute>
+          }
+        >
+          <Route path="/" element={<HomePage />} />
+          <Route path="/catalogo" element={<CatalogoPage />} />
+          <Route path="/recetas/:id" element={<RecetaPage />} />
+          <Route path="/lista" element={<ListaPage />} />
+          <Route path="/favoritas" element={<FavoritasPage />} />
+          <Route path="/planificador" element={<PlanificadorPage />} />
+          <Route path="/perfil" element={<ProfilePage />} />
+        </Route>
+
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+
+      <Toaster
+        position="bottom-left"
+        toastOptions={{
+          style: {
+            background: '#FFFFFF',
+            color: '#161513',
+            border: '1px solid #E6E1D7',
+            borderRadius: '8px',
+            fontFamily: 'Geist, sans-serif',
+            fontSize: '14px',
+          },
+        }}
+      />
+    </>
   );
 }

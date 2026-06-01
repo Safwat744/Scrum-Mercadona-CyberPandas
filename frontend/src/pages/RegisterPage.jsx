@@ -1,102 +1,153 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { register } from '../api/auth';
-import { useAuth } from '../context/AuthContext';
-import { Spinner } from '../components/ui/Spinner';
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { Eye, EyeOff, ArrowRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { register } from "@/api/auth";
+import { useAuth } from "@/context/AuthContext";
 
 export default function RegisterPage() {
   const { signIn } = useAuth();
-  const navigate   = useNavigate();
-  const [form, setForm]     = useState({ nombre: '', email: '', password: '' });
-  const [errors, setErrors] = useState({});
+  const navigate = useNavigate();
+  const [show, setShow] = useState(false);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [pwd, setPwd] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const validate = () => {
-    const e = {};
-    if (!form.nombre.trim()) e.nombre = 'El nombre es obligatorio.';
-    if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Email no válido.';
-    if (form.password.length < 8) e.password = 'Mínimo 8 caracteres.';
-    return e;
-  };
-
-  const handle = async (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
-    setErrors({});
+    if (!name || !email || !pwd) return toast.error("Completa todos los campos.");
+    if (pwd.length < 8) return toast.error("La contraseña debe tener al menos 8 caracteres.");
     setLoading(true);
     try {
-      const data = await register(form);
+      const data = await register({ nombre: name, email, password: pwd });
       signIn(data);
-      navigate('/onboarding');
-    } catch (err) {
-      const msg = err.response?.data?.error || 'Error al registrarse.';
-      setErrors({ general: msg });
+      toast.success("Cuenta creada");
+      navigate("/onboarding");
+    } catch (error) {
+      toast.error(error.response?.data?.error || "No se ha podido crear la cuenta.");
     } finally {
       setLoading(false);
     }
   };
 
-  const field = (key) => ({
-    value: form[key],
-    onChange: e => setForm(p => ({ ...p, [key]: e.target.value })),
-    className: `input-field${errors[key] ? ' error' : ''}`,
-  });
-
   return (
-    <div style={{
-      minHeight: '100vh', background: 'var(--bg-page)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-    }}>
-      <div style={{ width: '100%', maxWidth: 420 }}>
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ width: 56, height: 56, background: 'var(--green)', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
-            <span style={{ fontSize: 28 }}>🍳</span>
-          </div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
-            Recetas <span style={{ color: 'var(--green-dark)' }}>Hacendado</span>
-          </h1>
-        </div>
-
-        <div style={{ background: 'var(--bg-card)', borderRadius: 12, border: '1px solid var(--border)', padding: 32, boxShadow: 'var(--shadow-card)' }}>
-          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 24 }}>Crear cuenta</h2>
-
-          <form onSubmit={handle} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="input-group">
-              <label className="input-label">Nombre</label>
-              <input type="text" placeholder="Tu nombre" {...field('nombre')} />
-              {errors.nombre && <span className="input-error">{errors.nombre}</span>}
-            </div>
-
-            <div className="input-group">
-              <label className="input-label">Email</label>
-              <input type="email" placeholder="tu@email.com" {...field('email')} />
-              {errors.email && <span className="input-error">{errors.email}</span>}
-            </div>
-
-            <div className="input-group">
-              <label className="input-label">Contraseña</label>
-              <input type="password" placeholder="Mínimo 8 caracteres" {...field('password')} />
-              {errors.password && <span className="input-error">{errors.password}</span>}
-            </div>
-
-            {errors.general && (
-              <div style={{ background: '#FFF5F5', border: '1px solid #FCA5A5', borderRadius: 6, padding: '10px 14px', fontSize: 13, color: '#D93025' }}>
-                ⚠️ {errors.general}
-              </div>
-            )}
-
-            <button type="submit" className="btn btn-primary btn-full" style={{ height: 46, marginTop: 4 }} disabled={loading}>
-              {loading ? <><Spinner /> Creando cuenta...</> : 'Crear cuenta'}
-            </button>
-          </form>
-
-          <p style={{ textAlign: 'center', marginTop: 20, fontSize: 13, color: 'var(--text-muted)' }}>
-            ¿Ya tienes cuenta?{' '}
-            <Link to="/login" style={{ color: 'var(--green-dark)', fontWeight: 600 }}>Inicia sesión</Link>
+    <div className="min-h-screen grid md:grid-cols-2 bg-paper" data-testid="register-page">
+      <aside className="hidden md:block relative overflow-hidden bg-paper-deep grain">
+        <img
+          src="https://images.unsplash.com/photo-1495521821757-a1efb6729352?w=1400&q=80&auto=format&fit=crop"
+          alt=""
+          className="h-full w-full object-cover"
+          onError={(e) => (e.currentTarget.style.opacity = 0)}
+        />
+        <div className="absolute bottom-10 left-10 right-10">
+          <p className="eyebrow text-paper/80">Recetas Hacendado</p>
+          <p className="display-md text-paper mt-2 max-w-sm">
+            Una cuenta. Tu lista, tus recetas, tu cocina.
           </p>
         </div>
+      </aside>
+
+      <main className="flex items-center justify-center p-6 md:p-12">
+        <div className="w-full max-w-md">
+          <Link to="/catalogo" className="display-sm" style={{ fontWeight: 600 }}>
+            Recetas <span style={{ fontStyle: "italic", fontWeight: 400 }}>Hacendado</span>
+          </Link>
+
+          <header className="mt-14">
+            <p className="eyebrow">Crear cuenta</p>
+            <h1 className="display-lg mt-3 text-balance">Empieza en un minuto.</h1>
+            <p className="text-ink-soft text-[15px] mt-3">
+              Sin spam, sin newsletters automáticas. Solo lo que cocinas y compras.
+            </p>
+          </header>
+
+          <form onSubmit={submit} className="mt-10 space-y-5">
+            <Field label="Nombre" htmlFor="name">
+              <input
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Cómo quieres que te llamemos"
+                className="input-base"
+                data-testid="name-input"
+              />
+            </Field>
+            <Field label="Correo electrónico" htmlFor="email">
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="tu@correo.com"
+                className="input-base"
+                data-testid="email-input"
+              />
+            </Field>
+            <Field label="Contraseña" htmlFor="password" hint={<span className="meta-mono text-[11px]">Mín. 8 caracteres</span>}>
+              <div className="relative">
+                <input
+                  id="password"
+                  type={show ? "text" : "password"}
+                  value={pwd}
+                  onChange={(e) => setPwd(e.target.value)}
+                  placeholder="••••••••"
+                  className="input-base pr-10"
+                  data-testid="password-input"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShow((s) => !s)}
+                  aria-label={show ? "Ocultar" : "Mostrar"}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-soft hover:text-ink"
+                >
+                  {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </Field>
+
+            <Button size="lg" className="w-full" type="submit" disabled={loading} data-testid="submit-register">
+              {loading ? "Creando cuenta…" : "Crear cuenta"}
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </form>
+
+          <p className="mt-8 text-center text-sm text-ink-soft">
+            ¿Ya tienes cuenta?{" "}
+            <Link to="/login" className="link-editorial" data-testid="login-link">Iniciar sesión</Link>
+          </p>
+
+          <p className="mt-10 meta-mono text-center leading-relaxed">
+            Al crear tu cuenta aceptas los términos del servicio<br /> y la política de privacidad.
+          </p>
+        </div>
+      </main>
+
+      <style>{`
+        .input-base {
+          width: 100%; height: 44px; padding: 0 12px;
+          background: #FFFFFF; border: 1px solid #E6E1D7;
+          border-radius: 6px; font-family: 'Geist', sans-serif;
+          font-size: 15px; color: #161513; outline: none;
+          transition: border-color 160ms ease;
+        }
+        .input-base:hover { border-color: #5B5750; }
+        .input-base:focus { border-color: #161513; box-shadow: 0 0 0 3px rgba(22,21,19,0.06); }
+        .input-base::placeholder { color: #8C867C; }
+      `}</style>
+    </div>
+  );
+}
+
+function Field({ label, htmlFor, hint, children }) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-1.5">
+        <label htmlFor={htmlFor} className="label-cap text-ink-soft">{label}</label>
+        {hint}
       </div>
+      {children}
     </div>
   );
 }
