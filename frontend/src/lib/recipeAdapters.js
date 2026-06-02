@@ -53,6 +53,7 @@ export function normalizeCatalogRecipe(recipe) {
     category: recipe.categoria || null,
     calories: recipe.calorias_racion || null,
     author: recipe.autor_origen || null,
+    cocina: recipe.cocina || null,
     tags: Array.isArray(recipe.tags) ? recipe.tags : [],
     eyebrow: recipe.categoria || getRecipeEyebrow(recipe.tags),
   };

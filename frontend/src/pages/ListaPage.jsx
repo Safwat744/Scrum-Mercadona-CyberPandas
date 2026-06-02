@@ -350,14 +350,27 @@ function ProductCard({ item, onUpdatePkgs, onDelete, onSwap, isDespensa = false 
   const pkgs = Number(item.paquetes) || 0;
   const precioUnidad = Number(item.producto_precio || 0);
   const qtyNum = Number(item.cantidad_total || 0);
-  const qtyFmt = qtyNum % 1 !== 0 ? qtyNum.toFixed(1) : qtyNum;
+  const qtyFmt = parseFloat(qtyNum.toFixed(3));
 
   return (
     <li className={`relative group rounded-2xl border transition-all ${isDespensa ? "bg-paper border-dashed border-rule/60 opacity-75 hover:opacity-100" : "bg-paper border-rule hover:border-ink/20 shadow-sm"}`}>
       <div className="p-4 flex gap-4 sm:gap-5">
         <div className={`h-16 w-16 sm:h-20 sm:w-20 shrink-0 rounded-xl overflow-hidden bg-paper-deep border border-rule ${isDespensa ? "grayscale" : ""}`}>
           {item.producto_thumbnail_url ? (
-            <img src={item.producto_thumbnail_url} alt="" className="h-full w-full object-cover" loading="lazy" />
+            <img 
+              src={item.producto_thumbnail_url} 
+              alt="" 
+              className="h-full w-full object-cover" 
+              loading="lazy" 
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.style.display = 'none';
+                if(e.currentTarget.parentElement) {
+                  e.currentTarget.parentElement.classList.add('grid', 'place-items-center');
+                  e.currentTarget.parentElement.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-package text-ink-soft"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>`;
+                }
+              }} 
+            />
           ) : (
             <div className="h-full w-full grid place-items-center text-ink-soft">
               <Package className="h-6 w-6" />

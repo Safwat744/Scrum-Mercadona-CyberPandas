@@ -1,6 +1,21 @@
 const pool = require('../../config/database');
 
 // ─────────────────────────────────────────────
+// HELPER: Convertir unidades (ej: de 'ml' a 'l', de 'g' a 'kg')
+// ─────────────────────────────────────────────
+function convertToBaseUnit(amount, fromUnit, toUnit) {
+  if (!fromUnit || !toUnit) return amount;
+  const f = fromUnit.toLowerCase().trim();
+  const t = toUnit.toLowerCase().trim();
+  if (f === t) return amount;
+  if (f === 'g' && t === 'kg') return amount / 1000;
+  if (f === 'kg' && t === 'g') return amount * 1000;
+  if (f === 'ml' && t === 'l') return amount / 1000;
+  if (f === 'l' && t === 'ml') return amount * 1000;
+  return amount;
+}
+
+// ─────────────────────────────────────────────
 // CATÁLOGO — GET /recetas
 // HU-03 (catálogo) + HU-09 (filtros) + HU-11 (búsqueda)
 // ─────────────────────────────────────────────
@@ -253,7 +268,7 @@ async function getPrecio(id, raciones) {
   const factor       = raciones / racionesBase;
 
   const ingsRes = await pool.query(
-    `SELECT ir.cantidad_base, ph.precio, ph.cantidad_por_envase
+    `SELECT ir.cantidad_base, ir.unidad AS receta_unidad, ph.precio, ph.cantidad_por_envase, ph.unidad_base AS producto_unidad
      FROM ingredientes_receta ir
      JOIN productos_hacendado ph ON ph.id = ir.producto_id
      WHERE ir.receta_id = $1`,
@@ -264,7 +279,8 @@ async function getPrecio(id, raciones) {
   // coste_ingrediente      = cantidad_escalada × precio_por_unidad_base
   let total = 0;
   for (const ing of ingsRes.rows) {
-    const cantidadEscalada    = ing.cantidad_base * factor;
+    const cantidadConvertida = convertToBaseUnit(ing.cantidad_base, ing.receta_unidad, ing.producto_unidad);
+    const cantidadEscalada    = cantidadConvertida * factor;
     const precioPorUnidadBase = ing.precio / ing.cantidad_por_envase;
     total += cantidadEscalada * precioPorUnidadBase;
   }
@@ -274,7 +290,7 @@ async function getPrecio(id, raciones) {
     raciones:     raciones,
     raciones_base: racionesBase,
     precio_total: parseFloat(total.toFixed(2)),
-    precio_display: `~${total.toFixed(2).replace('.', ',')} €`,
+    precio_display: `Aprox. ${total.toFixed(2).replace('.', ',')} €`,
   };
 }
 

@@ -155,6 +155,14 @@ export default function QueCocinoHoySheet({ open, onOpenChange }) {
     if (!window.speechSynthesis || !value) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(value);
+    
+    // Select the best available Spanish voice
+    const voices = window.speechSynthesis.getVoices();
+    const esVoices = voices.filter(v => v.lang.startsWith('es'));
+    let selectedVoice = esVoices.find(v => v.name.includes('Natural') || v.name.includes('Premium') || v.name.includes('Google español') || v.name.includes('Sabina'));
+    if (!selectedVoice) selectedVoice = esVoices[0];
+    if (selectedVoice) utterance.voice = selectedVoice;
+
     utterance.lang = "es-ES";
     utterance.rate = 0.94;
     window.speechSynthesis.speak(utterance);

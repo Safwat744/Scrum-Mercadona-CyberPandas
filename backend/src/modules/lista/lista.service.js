@@ -1,6 +1,21 @@
 const pool = require('../../config/database');
 
 // ─────────────────────────────────────────────
+// HELPER: Convertir unidades (ej: de 'ml' a 'l', de 'g' a 'kg')
+// ─────────────────────────────────────────────
+function convertToBaseUnit(amount, fromUnit, toUnit) {
+  if (!fromUnit || !toUnit) return amount;
+  const f = fromUnit.toLowerCase().trim();
+  const t = toUnit.toLowerCase().trim();
+  if (f === t) return amount;
+  if (f === 'g' && t === 'kg') return amount / 1000;
+  if (f === 'kg' && t === 'g') return amount * 1000;
+  if (f === 'ml' && t === 'l') return amount / 1000;
+  if (f === 'l' && t === 'ml') return amount * 1000;
+  return amount;
+}
+
+// ─────────────────────────────────────────────
 // HELPER — obtener o crear la lista del usuario
 // ─────────────────────────────────────────────
 async function getOrCreateLista(usuarioId, client) {
@@ -44,7 +59,7 @@ async function addRecetaToLista(usuarioId, recetaId, raciones) {
 
   // 2. Obtener ingredientes de la receta con info del producto
   const ingsRes = await pool.query(
-    `SELECT ir.producto_id, ir.cantidad_base, ir.unidad, ph.cantidad_por_envase
+    `SELECT ir.producto_id, ir.cantidad_base, ir.unidad AS receta_unidad, ph.cantidad_por_envase, ph.unidad_base AS producto_unidad
      FROM ingredientes_receta ir
      JOIN productos_hacendado ph ON ph.id = ir.producto_id
      WHERE ir.receta_id = $1`,
@@ -66,7 +81,8 @@ async function addRecetaToLista(usuarioId, recetaId, raciones) {
 
     // 3. Para cada ingrediente: INSERT o suma (ON CONFLICT)
     for (const ing of ingsRes.rows) {
-      const cantidadEscalada = parseFloat((ing.cantidad_base * factor).toFixed(3));
+      const cantidadConvertida = convertToBaseUnit(ing.cantidad_base, ing.receta_unidad, ing.producto_unidad);
+      const cantidadEscalada = parseFloat((cantidadConvertida * factor).toFixed(3));
       const envaseBase = Number(ing.cantidad_por_envase) || 1;
       const calcPaquetes = Math.ceil(cantidadEscalada / envaseBase);
 
@@ -76,10 +92,10 @@ async function addRecetaToLista(usuarioId, recetaId, raciones) {
          ON CONFLICT (lista_id, producto_id)
          DO UPDATE SET
            cantidad_total = items_lista.cantidad_total + EXCLUDED.cantidad_total,
-           paquetes_a_comprar = COALESCE(items_lista.paquetes_a_comprar, CEIL(items_lista.cantidad_total / $6)) + EXCLUDED.paquetes_a_comprar,
+           paquetes_a_comprar = CEIL((items_lista.cantidad_total + EXCLUDED.cantidad_total) / $6),
            cogido         = FALSE,
            updated_at     = NOW()`,
-        [listaId, ing.producto_id, cantidadEscalada, ing.unidad, calcPaquetes, envaseBase]
+        [listaId, ing.producto_id, cantidadEscalada, ing.producto_unidad || ing.receta_unidad, calcPaquetes, envaseBase]
       );
     }
 

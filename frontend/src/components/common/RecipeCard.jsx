@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Heart, Clock, Users } from "lucide-react";
-
+import { getFlagUrl } from "@/lib/utils";
 export default function RecipeCard({ recipe, layout = "grid", favorite = false, onToggleFavorite, testid }) {
   const cardTestId = testid || `card-${recipe.id}`;
 
@@ -43,6 +43,17 @@ export default function RecipeCard({ recipe, layout = "grid", favorite = false, 
                 <span>Por {recipe.author}</span>
               </>
             )}
+            {recipe.cocina && (
+              <>
+                <span>·</span>
+                <span className="inline-flex items-center gap-1.5">
+                  {getFlagUrl(recipe.cocina) && (
+                    <img src={getFlagUrl(recipe.cocina)} alt="" className="w-4 h-auto shadow-sm rounded-sm" />
+                  )}
+                  {recipe.cocina}
+                </span>
+              </>
+            )}
           </p>
         </div>
       </Link>
@@ -82,6 +93,17 @@ export default function RecipeCard({ recipe, layout = "grid", favorite = false, 
               <>
                 <span>·</span>
                 <span>Por {recipe.author}</span>
+              </>
+            )}
+            {recipe.cocina && (
+              <>
+                <span>·</span>
+                <span className="inline-flex items-center gap-1.5">
+                  {getFlagUrl(recipe.cocina) && (
+                    <img src={getFlagUrl(recipe.cocina)} alt="" className="w-4 h-auto shadow-sm rounded-sm" />
+                  )}
+                  {recipe.cocina}
+                </span>
               </>
             )}
             {recipe.tags?.length ? (

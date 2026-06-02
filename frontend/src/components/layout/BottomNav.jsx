@@ -9,9 +9,20 @@ export default function BottomNav() {
   const [listCount, setListCount] = useState(0);
 
   useEffect(() => {
-    getLista(false)
-      .then((data) => setListCount((data.items || []).filter((item) => !item.cogido).length))
-      .catch(() => setListCount(0));
+    const fetchCount = () => {
+      getLista(false)
+        .then((data) => {
+          const items = Array.isArray(data) ? data : (data.items || []);
+          setListCount(items.filter((item) => !item.cogido).length);
+        })
+        .catch(() => setListCount(0));
+    };
+    fetchCount();
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('lista-updated', fetchCount);
+      return () => window.removeEventListener('lista-updated', fetchCount);
+    }
   }, [aiOpen]);
 
   return (

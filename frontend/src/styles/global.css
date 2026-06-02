@@ -111,6 +111,13 @@ h1, h2, h3, h4 {
   color: #161513;
 }
 
+.cooking-mode h1,
+.cooking-mode h2,
+.cooking-mode h3,
+.cooking-mode h4 {
+  color: inherit;
+}
+
 .display-xl {
   font-family: 'Fraunces', serif;
   font-weight: 500;

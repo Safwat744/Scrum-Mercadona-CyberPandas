@@ -10,6 +10,7 @@ import { getCatalogo, getPrecio, getReceta } from "@/api/recetas";
 import { getCookingMode } from "@/api/ai";
 import { addReceta } from "@/api/lista";
 import { getFavoritos, toggleFavorito } from "@/api/favoritos";
+import { getFlagUrl } from "@/lib/utils";
 import Stepper from "@/components/common/Stepper";
 import RecipeCard from "@/components/common/RecipeCard";
 import { Button } from "@/components/ui/button";
@@ -165,9 +166,12 @@ export default function RecetaPage() {
         </div>
 
         <div className="md:col-span-6 lg:col-span-5 md:sticky md:top-24 self-start">
-          <p className="eyebrow">
+          <div className="eyebrow flex items-center gap-2">
             {[recipe.category, recipe.cuisine].filter(Boolean).join(" · ") || recipe.eyebrow}
-          </p>
+            {recipe.cuisine && getFlagUrl(recipe.cuisine) && (
+              <img src={getFlagUrl(recipe.cuisine)} alt="" className="w-5 h-auto rounded-sm shadow-sm" />
+            )}
+          </div>
           <h1 className="display-xl mt-3 text-balance">{recipe.title}</h1>
 
           <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -271,8 +275,8 @@ export default function RecetaPage() {
           </button>
 
           <p className="meta-mono mt-3 text-center">
-            {hacendadoCount} de {recipe.ingredients.length} con producto Hacendado · ~
-            <span className="text-ink">{estimatedListPrice.toFixed(2)} €</span> estimado
+            {hacendadoCount} de {recipe.ingredients.length} con producto Hacendado · Aprox. 
+            <span className="text-ink"> {estimatedListPrice.toFixed(2)} €</span>
           </p>
         </div>
       </header>
@@ -296,7 +300,20 @@ export default function RecetaPage() {
                       <li key={ing.id} className="py-3.5 flex items-center gap-3" data-testid={`ing-${ing.id}`}>
                         {ing.hacendado?.thumbnail ? (
                           <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-paper-deep border border-rule">
-                            <img src={ing.hacendado.thumbnail} alt="" className="h-full w-full object-cover" loading="lazy" />
+                            <img 
+                              src={ing.hacendado.thumbnail} 
+                              alt="" 
+                              className="h-full w-full object-cover" 
+                              loading="lazy" 
+                              onError={(e) => {
+                                e.currentTarget.onerror = null;
+                                e.currentTarget.style.display = 'none';
+                                if(e.currentTarget.parentElement) {
+                                  e.currentTarget.parentElement.classList.add('grid', 'place-items-center');
+                                  e.currentTarget.parentElement.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-package text-ink-soft opacity-50"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>`;
+                                }
+                              }}
+                            />
                           </div>
                         ) : (
                           <div className="h-12 w-12 shrink-0 rounded-xl bg-paper-deep border border-rule" />
@@ -549,6 +566,31 @@ function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
     if (!window.speechSynthesis || !value) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(value);
+    
+    // Select the best available Spanish voice
+    let voices = window.speechSynthesis.getVoices();
+    if (voices.length === 0) {
+      // Force trigger voices load if empty
+      voices = window.speechSynthesis.getVoices();
+    }
+    
+    const esVoices = voices.filter(v => v.lang.startsWith('es'));
+    // Prioritize natural/online voices over the default desktop robotic ones
+    let selectedVoice = esVoices.find(v => 
+      v.name.includes('Natural') || 
+      v.name.includes('Online') || 
+      v.name.includes('Premium') || 
+      v.name.includes('Google español')
+    );
+    
+    if (!selectedVoice) {
+      // Fallbacks to known non-default ones
+      selectedVoice = esVoices.find(v => v.name.includes('Sabina') || v.name.includes('Pablo') || v.name.includes('Laura'));
+    }
+    
+    if (!selectedVoice) selectedVoice = esVoices[0];
+    if (selectedVoice) utterance.voice = selectedVoice;
+
     utterance.lang = "es-ES";
     utterance.rate = 0.95;
     window.speechSynthesis.speak(utterance);
@@ -575,10 +617,27 @@ function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
       });
     } catch { /* sin audio disponible */ }
   }, []);
+  // Bloquear scroll de la página al abrir modo cocina
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "auto";
+    }
+    return () => {
+      document.body.style.overflow = "auto";
+    };
+  }, [open]);
 
   // Carga del modo cocina (IA con fallback a los pasos de la receta)
   useEffect(() => {
     if (!open || !recipe) return;
+    
+    // Preload voices
+    if (window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+    }
+
     setLoading(true);
     setPhase("mise");
     setIndex(0);
@@ -783,16 +842,16 @@ function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
   const miseGroups = groupIngredients(recipe.ingredients);
 
   return (
-    <div className="fixed inset-0 z-50 bg-ink text-paper" data-testid="cooking-mode">
+    <div className="fixed inset-0 z-50 bg-ink text-paper cooking-mode" data-testid="cooking-mode">
       <div className="absolute inset-0">
         <img src={recipe.image} alt="" className="h-full w-full object-cover opacity-25" />
         <div className="absolute inset-0 bg-gradient-to-b from-ink/80 via-ink/95 to-ink" />
       </div>
 
-      <div className="relative z-10 flex min-h-screen flex-col px-6 py-5 md:px-10">
+      <div className="relative z-10 flex h-[100dvh] flex-col px-6 py-5 md:px-10">
         <header className="flex items-center justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-xs uppercase tracking-[0.2em] text-paper/55">Modo cocina</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-white/55">Modo cocina</p>
             <h2 className="mt-1 truncate text-xl font-semibold md:text-2xl">{mode?.titulo || recipe.title}</h2>
           </div>
           <div className="flex items-center gap-2">
@@ -807,7 +866,7 @@ function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
               aria-label={voiceOn ? "Silenciar narración" : "Activar narración"}
               aria-pressed={voiceOn}
             >
-              {voiceOn ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5 text-paper/50" />}
+              {voiceOn ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5 text-white/50" />}
             </button>
             {supportsSpeechRecognition && (
               <button
@@ -816,7 +875,7 @@ function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
                 aria-label={listening ? "Desactivar control por voz" : "Activar control por voz"}
                 aria-pressed={listening}
               >
-                {listening ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5 text-paper/50" />}
+                {listening ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5 text-white/50" />}
               </button>
             )}
             <button
@@ -834,25 +893,25 @@ function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
           <main className="grid flex-1 place-items-center py-8 text-center">
             <div>
               <p className="text-3xl font-semibold">Preparando modo cocina…</p>
-              <p className="mt-3 text-paper/60">Adaptando pasos para narración y temporizadores.</p>
+              <p className="mt-3 text-white/60">Adaptando pasos para narración y temporizadores.</p>
             </div>
           </main>
         ) : phase === "mise" ? (
           /* MISE EN PLACE */
-          <main className="flex flex-1 flex-col py-8" data-testid="cooking-mise">
+          <main className="flex flex-1 flex-col py-8 overflow-y-auto min-h-0 no-scrollbar" data-testid="cooking-mise">
             <div className="mx-auto w-full max-w-3xl">
-              <p className="text-xs uppercase tracking-[0.2em] text-paper/55">Antes de empezar</p>
-              <h1 className="mt-2 text-[clamp(2rem,5vw,3.5rem)] font-bold leading-[1] tracking-[-0.03em]">
+              <p className="text-xs uppercase tracking-[0.2em] text-white/55">Antes de empezar</p>
+              <h1 className="mt-2 text-white text-[clamp(2rem,5vw,3.5rem)] font-bold leading-[1] tracking-[-0.03em]">
                 Prepara tu mise en place.
               </h1>
-              <p className="mt-3 text-paper/70">
+              <p className="mt-3 text-white/70">
                 Ten todo a mano para {servings} {servings === 1 ? "ración" : "raciones"}. Cuando estés listo, empieza.
               </p>
               <div className="mt-8 space-y-6">
                 {miseGroups.map((group) => (
                   <div key={group.title}>
                     {miseGroups.length > 1 && (
-                      <p className="mb-2 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-paper/50">
+                      <p className="mb-2 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-white/50">
                         <Utensils className="h-3.5 w-3.5" /> {group.title}
                       </p>
                     )}
@@ -861,8 +920,8 @@ function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
                         const qty = typeof ing.qty === "number" ? +(ing.qty * ratio).toFixed(2) : ing.qty;
                         return (
                           <li key={ing.id} className="flex items-center justify-between gap-3 border-b border-white/10 py-2.5">
-                            <span className="text-paper/90">{ing.name}</span>
-                            <span className="num-mono text-sm text-paper/60">{qty} {ing.unit}</span>
+                            <span className="text-white/90">{ing.name}</span>
+                            <span className="num-mono text-sm text-white/60">{qty} {ing.unit}</span>
                           </li>
                         );
                       })}
@@ -898,10 +957,10 @@ function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
               <span className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-mercadona">
                 <PartyPopper className="h-10 w-10 text-white" />
               </span>
-              <h1 className="mt-6 text-[clamp(2rem,5vw,3.5rem)] font-bold leading-[1] tracking-[-0.03em]">
+              <h1 className="mt-6 text-white text-[clamp(2rem,5vw,3.5rem)] font-bold leading-[1] tracking-[-0.03em]">
                 ¡Listo! Buen provecho.
               </h1>
-              <p className="mt-3 text-paper/70">Has terminado {recipe.title}. ¿Qué te ha parecido?</p>
+              <p className="mt-3 text-white/70">Has terminado {recipe.title}. ¿Qué te ha parecido?</p>
 
               <div className="mt-6 flex justify-center gap-2" data-testid="done-rating">
                 {[1, 2, 3, 4, 5].map((star) => (
@@ -951,10 +1010,10 @@ function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
               onTouchEnd={onTouchEnd}
             >
               <div className="mx-auto w-full max-w-3xl text-center">
-                <div className="flex items-center justify-center gap-4 text-sm text-paper/60">
+                <div className="flex items-center justify-center gap-4 text-sm text-white/60">
                   <span>Paso {index + 1} de {steps.length}</span>
                   {current?.timer_recomendado && (
-                    <span className="inline-flex items-center gap-1.5 text-paper/70">
+                    <span className="inline-flex items-center gap-1.5 text-white/70">
                       <Timer className="h-3.5 w-3.5" /> Temporizador recomendado
                     </span>
                   )}
@@ -966,17 +1025,17 @@ function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
                   />
                 </div>
 
-                <h1 className="mt-9 text-balance text-[clamp(2rem,5.5vw,4.5rem)] font-bold leading-[1] tracking-[-0.04em]">
+                <h1 className="mt-9 text-white text-balance text-[clamp(2rem,5.5vw,4.5rem)] font-bold leading-[1] tracking-[-0.04em]">
                   {current?.titulo}
                 </h1>
-                <p className="mx-auto mt-6 max-w-2xl text-xl leading-relaxed text-paper/80 md:text-2xl">
+                <p className="mx-auto mt-6 max-w-2xl text-xl leading-relaxed text-white/80 md:text-2xl">
                   {current?.narracion}
                 </p>
 
                 <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
                   <button
                     onClick={() => speak(current?.narracion)}
-                    className="inline-flex h-14 items-center gap-2 rounded-full bg-white px-5 font-medium text-ink"
+                    className="inline-flex h-14 items-center gap-2 rounded-full bg-white px-5 font-medium text-black"
                   >
                     <RotateCcw className="h-4 w-4" />
                     Repetir voz
@@ -1029,19 +1088,19 @@ function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
       {/* Confirmar salida a media cocción */}
       {confirmClose && (
         <div className="absolute inset-0 z-20 grid place-items-center bg-ink/70 px-6 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl bg-paper-raised p-6 text-ink shadow-raised">
+          <div className="w-full max-w-sm rounded-2xl bg-paper-raised p-6 text-black shadow-raised">
             <h3 className="display-sm">¿Salir del modo cocina?</h3>
-            <p className="mt-2 text-sm text-ink-soft">Podrás retomar en el paso {index + 1} cuando vuelvas.</p>
+            <p className="mt-2 text-sm text-black-soft">Podrás retomar en el paso {index + 1} cuando vuelvas.</p>
             <div className="mt-6 flex flex-col gap-3">
               <button
                 onClick={doClose}
-                className="inline-flex h-14 items-center justify-center rounded-xl bg-ink font-medium text-paper"
+                className="inline-flex h-14 items-center justify-center rounded-xl bg-ink font-medium text-white"
               >
                 Salir
               </button>
               <button
                 onClick={() => setConfirmClose(false)}
-                className="inline-flex h-12 items-center justify-center rounded-xl border border-rule font-medium text-ink-soft"
+                className="inline-flex h-12 items-center justify-center rounded-xl border border-rule font-medium text-black-soft"
               >
                 Seguir cocinando
               </button>
