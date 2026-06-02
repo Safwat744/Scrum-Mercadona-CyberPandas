@@ -151,13 +151,28 @@ export default function QueCocinoHoySheet({ open, onOpenChange }) {
     setText(question);
   };
 
+  // Cache voices as soon as Chrome loads them (async event)
+  const cachedVoicesRef = useRef([]);
+  useEffect(() => {
+    if (!window.speechSynthesis) return;
+    const loadVoices = () => {
+      const all = window.speechSynthesis.getVoices();
+      if (all.length > 0) cachedVoicesRef.current = all;
+    };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => { window.speechSynthesis.onvoiceschanged = null; };
+  }, []);
+
   const speak = (value) => {
     if (!window.speechSynthesis || !value) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(value);
     
     // Select the best available Spanish voice
-    const voices = window.speechSynthesis.getVoices();
+    const voices = cachedVoicesRef.current.length > 0
+      ? cachedVoicesRef.current
+      : window.speechSynthesis.getVoices();
     const esVoices = voices.filter(v => v.lang.startsWith('es'));
     let selectedVoice = esVoices.find(v => v.name.includes('Natural') || v.name.includes('Premium') || v.name.includes('Google español') || v.name.includes('Sabina'));
     if (!selectedVoice) selectedVoice = esVoices[0];

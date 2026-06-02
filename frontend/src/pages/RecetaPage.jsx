@@ -562,17 +562,28 @@ function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
   voiceOnRef.current = voiceOn;
   const storageKey = recipe ? `cookmode:${recipe.id}` : null;
 
+  // Cache voices as soon as Chrome loads them (async event)
+  const cachedVoicesRef = useRef([]);
+  useEffect(() => {
+    if (!window.speechSynthesis) return;
+    const loadVoices = () => {
+      const all = window.speechSynthesis.getVoices();
+      if (all.length > 0) cachedVoicesRef.current = all;
+    };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => { window.speechSynthesis.onvoiceschanged = null; };
+  }, []);
+
   const speak = useCallback((value) => {
     if (!window.speechSynthesis || !value) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(value);
     
     // Select the best available Spanish voice
-    let voices = window.speechSynthesis.getVoices();
-    if (voices.length === 0) {
-      // Force trigger voices load if empty
-      voices = window.speechSynthesis.getVoices();
-    }
+    let voices = cachedVoicesRef.current.length > 0
+      ? cachedVoicesRef.current
+      : window.speechSynthesis.getVoices();
     
     const esVoices = voices.filter(v => v.lang.startsWith('es'));
     // Prioritize natural/online voices over the default desktop robotic ones
@@ -632,11 +643,6 @@ function CookingModeOverlay({ open, onOpenChange, recipe, servings }) {
   // Carga del modo cocina (IA con fallback a los pasos de la receta)
   useEffect(() => {
     if (!open || !recipe) return;
-    
-    // Preload voices
-    if (window.speechSynthesis) {
-      window.speechSynthesis.getVoices();
-    }
 
     setLoading(true);
     setPhase("mise");
